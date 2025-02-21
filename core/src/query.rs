@@ -2,9 +2,7 @@ use std::any::{Any, TypeId};
 
 use smallvec::SmallVec;
 
-use crate::state::{
-  MapReader, MapWriterAsReader, PartData, ReadRef, Reader, StateReader, StateWriter, WriteRef,
-};
+use crate::state::*;
 
 /// A type can composed by many types, this trait help us to query the type and
 /// the inner type by type id.
@@ -24,16 +22,7 @@ pub trait Query: Any {
   /// Queries the reference of the writer that matches the provided type id.
   fn query_write(&self, id: &QueryId) -> Option<QueryHandle>;
 
-  /// Query multiple types sequentially from inside to outside and return the
-  /// first one that matches the `filter` function.
-  ///
-  /// It's not equivalent to query the id one by one, it query all types level
-  /// by level.
-  fn query_match(
-    &self, ids: &[QueryId], filter: &dyn Fn(&QueryId, &QueryHandle) -> bool,
-  ) -> Option<(QueryId, QueryHandle)>;
-
-  /// Hint this is a non-queryable type.
+  /// Hint if this is a queryable type.
   fn queryable(&self) -> bool { true }
 }
 
@@ -62,13 +51,7 @@ impl<'a> QueryHandle<'a> {
   pub fn downcast_ref<T: Any>(&self) -> Option<&T> {
     match self.0 {
       InnerHandle::Ref(r) => r.q_downcast_ref::<T>(),
-      InnerHandle::Owned(ref o) => o
-        .q_downcast_ref::<ReadRef<'static, dyn QueryAny>>()
-        .and_then(|r| r.q_downcast_ref::<T>())
-        .or_else(|| {
-          o.q_downcast_ref::<WriteRef<'static, dyn QueryAny>>()
-            .and_then(|w| w.q_downcast_ref::<T>())
-        }),
+      InnerHandle::Owned(ref o) => downcast_from_state_ref(o),
     }
   }
 
@@ -84,23 +67,23 @@ impl<'a> QueryHandle<'a> {
       return None;
     };
 
-    o.q_downcast_mut::<WriteRef<'static, dyn QueryAny>>()?
-      .q_downcast_mut::<T>()
+    o.q_downcast_mut::<WriteRef<'static, T>>()
+      .map(|v| &mut **v)
   }
 
   pub(crate) fn new(r: &'a dyn QueryAny) -> Self { QueryHandle(InnerHandle::Ref(r)) }
 
-  pub(crate) fn from_read_ref(r: ReadRef<'a, dyn QueryAny>) -> Self {
+  pub(crate) fn from_read_ref<T: ?Sized + 'static>(r: ReadRef<'a, T>) -> Self {
     // Safety: The lifetime is maintained in the return handle and will be shortened
     // once the handle is downcast.
-    let r: ReadRef<'static, dyn QueryAny> = unsafe { std::mem::transmute(r) };
+    let r: ReadRef<'static, T> = unsafe { std::mem::transmute(r) };
     QueryHandle(InnerHandle::Owned(Box::new(r)))
   }
 
-  pub(crate) fn from_write_ref(w: WriteRef<'a, dyn QueryAny>) -> Self {
+  pub(crate) fn from_write_ref<T: ?Sized + 'static>(w: WriteRef<'a, T>) -> Self {
     // Safety: The lifetime is maintained in the return handle and will be shortened
     // once the handle is downcast.
-    let w: WriteRef<'static, dyn QueryAny> = unsafe { std::mem::transmute(w) };
+    let w: WriteRef<'static, T> = unsafe { std::mem::transmute(w) };
     QueryHandle(InnerHandle::Owned(Box::new(w)))
   }
 
@@ -110,13 +93,7 @@ impl<'a> QueryHandle<'a> {
         .q_downcast_ref::<T>()
         .map(|type_ref| QueryRef { type_ref, data: None }),
       InnerHandle::Owned(o) => {
-        let inner = o
-          .q_downcast_ref::<ReadRef<'static, dyn QueryAny>>()
-          .and_then(|r| r.q_downcast_ref::<T>())
-          .or_else(|| {
-            o.q_downcast_ref::<WriteRef<'static, dyn QueryAny>>()
-              .and_then(|w| w.q_downcast_ref::<T>())
-          })?;
+        let inner = downcast_from_state_ref::<T>(&o)?;
         let type_ref = unsafe { &*(inner as *const T) };
         Some(QueryRef { type_ref, data: Some(o) })
       }
@@ -128,13 +105,23 @@ impl<'a> QueryHandle<'a> {
       return None;
     };
 
-    let w = *q_downcast::<WriteRef<'static, dyn QueryAny>>(o).ok()?;
-    WriteRef::filter_map(w, |v| {
-      v.q_downcast_mut::<T>()
-        .map(PartData::from_ref_mut)
+    o.is::<WriteRef<'static, T>>().then(|| unsafe {
+      let raw = Box::into_raw(o);
+      *Box::from_raw(raw as *mut WriteRef<'static, T>)
     })
-    .ok()
   }
+}
+
+#[allow(clippy::borrowed_box)] // The state reference must be a trait boxed.
+fn downcast_from_state_ref<T: 'static>(owned: &Box<dyn QueryAny>) -> Option<&T> {
+  owned
+    .q_downcast_ref::<ReadRef<'static, T>>()
+    .map(|v| &**v)
+    .or_else(|| {
+      owned
+        .q_downcast_ref::<WriteRef<'static, T>>()
+        .map(|v| &**v)
+    })
 }
 
 impl<'q, T: ?Sized> QueryRef<'q, T> {
@@ -221,17 +208,6 @@ impl<T: Any> Query for Queryable<T> {
 
   fn query_write(&self, _: &QueryId) -> Option<QueryHandle> { None }
 
-  fn query_match(
-    &self, ids: &[QueryId], filter: &dyn Fn(&QueryId, &QueryHandle) -> bool,
-  ) -> Option<(QueryId, QueryHandle)> {
-    ids.iter().find_map(|id| {
-      self
-        .query(id)
-        .filter(|h| filter(id, h))
-        .map(|h| (*id, h))
-    })
-  }
-
   fn queryable(&self) -> bool { true }
 }
 
@@ -255,8 +231,7 @@ where
 
   fn query(&self, query_id: &QueryId) -> Option<QueryHandle> {
     if query_id == &QueryId::of::<T::Value>() {
-      let w = ReadRef::map(self.read(), |v| PartData::from_ref(v as &dyn QueryAny));
-      Some(QueryHandle::from_read_ref(w))
+      Some(QueryHandle::from_read_ref(self.read()))
     } else if query_id == &QueryId::of::<T>() {
       Some(QueryHandle::new(self))
     } else {
@@ -266,8 +241,7 @@ where
 
   fn query_write(&self, query_id: &QueryId) -> Option<QueryHandle> {
     if query_id == &QueryId::of::<T::Value>() {
-      let w = WriteRef::map(self.write(), |v| PartData::from_ref(v as &dyn QueryAny));
-      Some(QueryHandle::from_write_ref(w))
+      Some(QueryHandle::from_write_ref(self.write()))
     } else if query_id == &QueryId::of::<T>() {
       Some(QueryHandle::new(self))
     } else {
@@ -275,16 +249,6 @@ where
     }
   }
 
-  fn query_match(
-    &self, ids: &[QueryId], filter: &dyn Fn(&QueryId, &QueryHandle) -> bool,
-  ) -> Option<(QueryId, QueryHandle)> {
-    ids.iter().find_map(|id| {
-      self
-        .query(id)
-        .filter(|h| filter(id, h))
-        .map(|h| (*id, h))
-    })
-  }
   fn queryable(&self) -> bool { true }
 }
 
@@ -302,8 +266,7 @@ macro_rules! impl_query_for_reader {
 
     fn query(&self, query_id: &QueryId) -> Option<QueryHandle> {
       if query_id == &QueryId::of::<V>() {
-        let r = ReadRef::map(self.read(), |v| PartData::from_ref(v as &dyn QueryAny));
-        Some(QueryHandle::from_read_ref(r))
+        Some(QueryHandle::from_read_ref(self.read()))
       } else if query_id == &QueryId::of::<Self>() {
         Some(QueryHandle::new(self))
       } else {
@@ -313,38 +276,30 @@ macro_rules! impl_query_for_reader {
 
     fn query_write(&self, _: &QueryId) -> Option<QueryHandle> { None }
 
-    fn query_match(
-      &self, ids: &[QueryId], filter: &dyn Fn(&QueryId, &QueryHandle) -> bool,
-    ) -> Option<(QueryId, QueryHandle)> {
-      ids.iter().find_map(|id| {
-        self
-          .query(id)
-          .filter(|h| filter(id, h))
-          .map(move |q| (*id, q))
-      })
-    }
-
     fn queryable(&self) -> bool { true }
   };
 }
 
-impl<S, F, V> Query for MapReader<S, F>
+impl<S, F, V: 'static> Query for MapReader<S, F>
 where
   Self: StateReader<Value = V>,
-  V: Any,
 {
   impl_query_for_reader!();
 }
 
-impl<S, F, V> Query for MapWriterAsReader<S, F>
-where
-  Self: StateReader<Value = V>,
-  V: Any,
-{
+impl<V: 'static> Query for Reader<V> {
   impl_query_for_reader!();
 }
 
-impl<V: Any> Query for Reader<V> {
+impl<V: 'static> Query for Box<dyn StateReader<Value = V>> {
+  impl_query_for_reader!();
+}
+
+impl<V: 'static, R: StateReader<Value = V>> Query for Watcher<R> {
+  impl_query_for_reader!();
+}
+
+impl<V: 'static> Query for Box<dyn StateWatcher<Value = V>> {
   impl_query_for_reader!();
 }
 
@@ -360,21 +315,21 @@ pub struct QueryId {
   info: fn() -> TypeInfo,
 }
 
-#[derive(Debug, PartialEq, Eq)]
-struct TypeInfo {
-  name: &'static str,
-  pkg_version: &'static str,
-  layout: &'static std::alloc::Layout,
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
+pub(crate) struct TypeInfo {
+  pub(crate) name: &'static str,
+  pub(crate) pkg_version: &'static str,
+  pub(crate) layout: &'static std::alloc::Layout,
 }
 
-struct TypeInfoOf<T> {
+pub(crate) struct TypeInfoOf<T> {
   _phantom: std::marker::PhantomData<T>,
 }
 
 impl<T> TypeInfoOf<T> {
   const LAYOUT: std::alloc::Layout = std::alloc::Layout::new::<T>();
 
-  fn type_info() -> TypeInfo {
+  pub(crate) fn type_info() -> TypeInfo {
     TypeInfo {
       name: std::any::type_name::<T>(),
       pkg_version: env!("CARGO_PKG_VERSION"),
@@ -433,21 +388,10 @@ impl dyn QueryAny {
   }
 }
 
-fn q_downcast<T: QueryAny>(any: Box<dyn QueryAny>) -> Result<Box<T>, Box<dyn QueryAny>> {
-  if any.is::<T>() {
-    unsafe {
-      let raw = Box::into_raw(any);
-      Ok(Box::from_raw(raw as *mut T))
-    }
-  } else {
-    Err(any)
-  }
-}
-
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::{reset_test_env, state::State};
+  use crate::{prelude::PartMut, reset_test_env, state::State};
 
   #[test]
   fn query_ref() {
@@ -487,7 +431,7 @@ mod tests {
     }
 
     let x = State::value(X { a: 0, _b: 1 });
-    let y = x.split_writer(|x| PartData::from_ref_mut(&mut x.a));
+    let y = x.split_writer(|x| PartMut::new(&mut x.a));
     {
       let h = y.query(&QueryId::of::<i32>()).unwrap();
       assert!(h.downcast_ref::<i32>().is_some());

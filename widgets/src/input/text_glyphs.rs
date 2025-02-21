@@ -1,81 +1,101 @@
-use std::ops::Range;
+use std::cell::{Ref, RefCell};
 
 use ribir_core::prelude::*;
 
-use super::caret_state::CaretPosition;
+use super::{CaretPosition, edit_text::BaseText};
 
-impl<K, V> SingleKeyMap<K, V>
+/// [`TextGlyphs`]
+///
+/// The TextGlyphs will give Provider of Stateful<TextGlyphs> to the descendants
+/// Widgets TextGlyphs include the text data and the glyphs, and can give you
+/// more information about glyph's layout or help you paint the text.
+#[derive(Clone, Declare, Default)]
+pub struct TextGlyphs<T>
 where
-  K: Eq,
+  T: 'static,
 {
-  fn get(&self, key: &K) -> Option<&V> {
-    self
-      .0
-      .as_ref()
-      .filter(|(k, _)| k == key)
-      .map(|(_, v)| v)
+  text: T,
+  #[declare(skip)]
+  glyphs: RefCell<Option<VisualGlyphs>>,
+}
+
+impl<T: 'static> TextGlyphs<T> {
+  pub fn new(text: T) -> Self { Self { text, glyphs: Default::default() } }
+
+  pub fn text(&self) -> &T { &self.text }
+
+  pub fn text_mut(&mut self) -> &mut T {
+    self.glyphs.take();
+    &mut self.text
+  }
+
+  pub fn glyphs(&self) -> Option<Ref<VisualGlyphs>> {
+    Ref::filter_map(self.glyphs.borrow(), |v| v.as_ref()).ok()
   }
 }
 
-struct SingleKeyMap<K, V>(Option<(K, V)>);
+pub trait VisualText: BaseText {
+  /// return self's glyphs layout info.
+  fn layout_glyphs(&self, clamp: BoxClamp, ctx: &LayoutCtx) -> VisualGlyphs;
 
-impl<K, V> Default for SingleKeyMap<K, V> {
-  fn default() -> Self { Self(None) }
+  /// paint the glyphs in the rect.
+  fn paint(&self, painter: &mut Painter, style: PaintingStyle, glyphs: &VisualGlyphs, rect: Rect);
 }
 
-#[derive(Default)]
-pub(crate) struct TextGlyphsHelper {
-  helper: SingleKeyMap<CowArc<str>, VisualGlyphs>,
-}
-
-impl TextGlyphsHelper {
-  pub(crate) fn new(text: CowArc<str>, glyphs: VisualGlyphs) -> Self {
-    Self { helper: SingleKeyMap(Some((text, glyphs))) }
+impl VisualText for CowArc<str> {
+  fn layout_glyphs(&self, clamp: BoxClamp, ctx: &LayoutCtx) -> VisualGlyphs {
+    let style = Provider::of::<TextStyle>(ctx).unwrap();
+    text_glyph(self.substr(..), &style, TextAlign::Start, clamp.max)
   }
 
-  pub(crate) fn line_end(&self, text: &CowArc<str>, caret: CaretPosition) -> Option<CaretPosition> {
-    self.helper.get(text)?.line_end(caret).into()
-  }
-
-  pub(crate) fn line_begin(
-    &self, text: &CowArc<str>, caret: CaretPosition,
-  ) -> Option<CaretPosition> {
-    self.helper.get(text)?.line_begin(caret).into()
-  }
-
-  pub(crate) fn prev(&self, text: &CowArc<str>, caret: CaretPosition) -> Option<CaretPosition> {
-    self.helper.get(text)?.prev(caret).into()
-  }
-
-  pub(crate) fn next(&self, text: &CowArc<str>, caret: CaretPosition) -> Option<CaretPosition> {
-    self.helper.get(text)?.next(caret).into()
-  }
-
-  pub(crate) fn up(&self, text: &CowArc<str>, caret: CaretPosition) -> Option<CaretPosition> {
-    self.helper.get(text)?.up(caret).into()
-  }
-
-  pub(crate) fn down(&self, text: &CowArc<str>, caret: CaretPosition) -> Option<CaretPosition> {
-    self.helper.get(text)?.down(caret).into()
-  }
-
-  pub(crate) fn cursor(&self, text: &CowArc<str>, caret: CaretPosition) -> Option<Point> {
-    let this = self.helper.get(text)?;
-    this.cursor(caret).into()
-  }
-
-  pub(crate) fn line_height(&self, text: &CowArc<str>, caret: CaretPosition) -> Option<f32> {
-    let this = self.helper.get(text)?;
-    this.line_height_by_caret(caret).into()
-  }
-
-  pub(crate) fn selection(&self, text: &CowArc<str>, rg: &Range<usize>) -> Option<Vec<Rect>> {
-    self.helper.get(text)?.selection(rg).into()
+  fn paint(&self, painter: &mut Painter, style: PaintingStyle, glyphs: &VisualGlyphs, rect: Rect) {
+    paint_text(painter, glyphs, style, rect);
   }
 }
 
-pub(crate) trait GlyphsHelper {
-  fn caret_position_from_pos(&self, x: f32, y: f32) -> CaretPosition;
+impl<T: VisualText> TextGlyphs<T> {
+  pub fn paint(&self, painter: &mut Painter, style: PaintingStyle, rect: Rect) {
+    if let Some(glyphs) = self.glyphs() {
+      self.text.paint(painter, style, &glyphs, rect);
+    }
+  }
+
+  pub fn layout_glyphs(&mut self, clamp: BoxClamp, ctx: &LayoutCtx) {
+    *self.glyphs.borrow_mut() = Some(self.text.layout_glyphs(clamp, ctx));
+  }
+}
+
+impl<T: VisualText + 'static> Render for TextGlyphs<T> {
+  fn perform_layout(&self, clamp: BoxClamp, ctx: &mut LayoutCtx) -> Size {
+    let glyphs = self.text.layout_glyphs(clamp, ctx);
+    let size = glyphs.visual_rect().size;
+    *self.glyphs.borrow_mut() = Some(glyphs);
+    size
+  }
+
+  fn visual_box(&self, _: &mut VisualCtx) -> Option<Rect> {
+    let visual_glyphs = self.glyphs().unwrap();
+    Some(visual_glyphs.visual_rect())
+  }
+
+  fn paint(&self, ctx: &mut PaintingCtx) {
+    let box_rect = Rect::from_size(ctx.box_size().unwrap());
+    if ctx
+      .painter()
+      .intersection_paint_bounds(&box_rect)
+      .is_none()
+    {
+      return;
+    };
+
+    let style = Provider::of::<PaintingStyle>(ctx).map(|p| p.clone());
+    let visual_glyphs = self.glyphs().unwrap();
+    paint_text(ctx.painter(), &visual_glyphs, style.unwrap_or(PaintingStyle::Fill), box_rect);
+  }
+}
+
+pub trait VisualGlyphsHelper {
+  fn caret_position_from_pos(&self, pos: Point) -> CaretPosition;
 
   fn line_end(&self, caret: CaretPosition) -> CaretPosition;
 
@@ -93,18 +113,14 @@ pub(crate) trait GlyphsHelper {
 
   fn cursor(&self, caret: CaretPosition) -> Point;
 
-  fn line_height_by_caret(&self, caret: CaretPosition) -> f32;
-
-  fn selection(&self, rg: &Range<usize>) -> Vec<Rect>;
-
   fn caret_position(&self, caret: CaretPosition) -> (usize, usize);
 }
 
-impl GlyphsHelper for VisualGlyphs {
-  fn caret_position_from_pos(&self, x: f32, y: f32) -> CaretPosition {
-    let (para, mut offset) = self.nearest_glyph(x, y);
+impl VisualGlyphsHelper for VisualGlyphs {
+  fn caret_position_from_pos(&self, pos: Point) -> CaretPosition {
+    let (para, mut offset) = self.nearest_glyph(pos.x, pos.y);
     let rc = self.glyph_rect(para, offset);
-    if (rc.min_x() - x).abs() > (rc.max_x() - x).abs() {
+    if (rc.min_x() - pos.x).abs() > (rc.max_x() - pos.x).abs() {
       offset += 1;
     }
     let cluster = self.position_to_cluster(para, offset);
@@ -143,6 +159,7 @@ impl GlyphsHelper for VisualGlyphs {
 
   fn next(&self, caret: CaretPosition) -> CaretPosition {
     let (mut row, mut col) = self.caret_position(caret);
+
     (row, col) = match (row + 1 < self.glyph_row_count(), col < self.glyph_count(row, true)) {
       (_, true) => (row, col + 1),
       (true, false) => (row + 1, 0),
@@ -166,6 +183,7 @@ impl GlyphsHelper for VisualGlyphs {
 
   fn down(&self, caret: CaretPosition) -> CaretPosition {
     let (mut row, mut col) = self.caret_position(caret);
+
     (row, col) = match row + 1 < self.glyph_row_count() {
       true => (row + 1, col.min(self.glyph_count(row + 1, true))),
       false => (row, col),
@@ -176,25 +194,14 @@ impl GlyphsHelper for VisualGlyphs {
 
   fn cursor(&self, caret: CaretPosition) -> Point {
     let (row, col) = self.caret_position(caret);
+
     if col == 0 {
-      let glphy = self.glyph_rect(row, col);
-      Point::new(glphy.min_x(), glphy.min_y())
+      let glyph = self.glyph_rect(row, col);
+      Point::new(glyph.min_x(), glyph.min_y())
     } else {
-      let glphy = self.glyph_rect(row, col - 1);
-      Point::new(glphy.max_x(), glphy.min_y())
+      let glyph = self.glyph_rect(row, col - 1);
+      Point::new(glyph.max_x(), glyph.min_y())
     }
-  }
-
-  fn line_height_by_caret(&self, caret: CaretPosition) -> f32 {
-    let (row, _col) = self.caret_position(caret);
-    self.line_height(row)
-  }
-
-  fn selection(&self, rg: &Range<usize>) -> Vec<Rect> {
-    if rg.is_empty() {
-      return vec![];
-    }
-    self.select_range(rg)
   }
 
   fn caret_position(&self, caret: CaretPosition) -> (usize, usize) {
@@ -204,6 +211,16 @@ impl GlyphsHelper for VisualGlyphs {
   }
 }
 
+impl<T> std::ops::Deref for TextGlyphs<T> {
+  type Target = T;
+
+  fn deref(&self) -> &Self::Target { &self.text }
+}
+
+impl<T> std::ops::DerefMut for TextGlyphs<T> {
+  fn deref_mut(&mut self) -> &mut Self::Target { &mut self.text }
+}
+
 #[cfg(test)]
 mod tests {
   use std::cell::RefCell;
@@ -211,8 +228,7 @@ mod tests {
   use ribir_core::prelude::{font_db::FontDB, typography::PlaceLineDirection, *};
   use ribir_geom::Size;
 
-  use super::GlyphsHelper;
-  use crate::input::caret_state::CaretPosition;
+  use crate::{input::text_glyphs::VisualGlyphsHelper, prelude::CaretPosition};
 
   fn test_store() -> TypographyStore {
     let font_db = Sc::new(RefCell::new(FontDB::default()));
@@ -234,8 +250,9 @@ mod tests {
       line_height: 16.,
       overflow: TextOverflow::AutoWrap,
     };
+    let text: CowArc<str> = "1 23 456 7890\n12345".into();
     let glyphs = store.typography(
-      "1 23 456 7890\n12345".into(),
+      text.substr(..),
       &style,
       Size::new(GlyphUnit::PIXELS_PER_EM as f32 * 5.0, GlyphUnit::PIXELS_PER_EM as f32 * 3.0),
       TextAlign::Start,
@@ -243,25 +260,24 @@ mod tests {
       PlaceLineDirection::TopToBottom,
     );
 
-    let helper = glyphs;
     let mut caret = CaretPosition { cluster: 0, position: None };
-    caret = helper.prev(caret);
+    caret = glyphs.prev(caret);
     assert!(caret == CaretPosition { cluster: 0, position: Some((0, 0)) });
-    caret = helper.line_end(caret);
+    caret = glyphs.line_end(caret);
     assert!(caret == CaretPosition { cluster: 9, position: Some((0, 9)) });
-    caret = helper.next(caret);
+    caret = glyphs.next(caret);
     assert!(caret == CaretPosition { cluster: 9, position: Some((1, 0)) });
-    caret = helper.prev(caret);
+    caret = glyphs.prev(caret);
     assert!(caret == CaretPosition { cluster: 9, position: Some((0, 9)) });
-    caret = helper.down(caret);
+    caret = glyphs.down(caret);
     assert!(caret == CaretPosition { cluster: 13, position: Some((1, 4)) });
-    caret = helper.next(caret);
+    caret = glyphs.next(caret);
     assert!(caret == CaretPosition { cluster: 14, position: Some((2, 0)) });
-    caret = helper.prev(caret);
+    caret = glyphs.prev(caret);
     assert!(caret == CaretPosition { cluster: 13, position: Some((1, 4)) });
-    caret = helper.line_begin(caret);
+    caret = glyphs.line_begin(caret);
     assert!(caret == CaretPosition { cluster: 9, position: Some((1, 0)) });
-    caret = helper.up(caret);
+    caret = glyphs.up(caret);
     assert!(caret == CaretPosition { cluster: 0, position: Some((0, 0)) });
   }
 }

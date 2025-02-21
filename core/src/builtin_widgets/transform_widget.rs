@@ -11,7 +11,7 @@ impl Declare for TransformWidget {
   fn declarer() -> Self::Builder { FatObj::new(()) }
 }
 
-impl_compose_child_for_wrap_render!(TransformWidget);
+impl_compose_child_for_wrap_render!(TransformWidget, DirtyPhase::Paint);
 
 impl WrapRender for TransformWidget {
   #[inline]
@@ -19,12 +19,20 @@ impl WrapRender for TransformWidget {
     host.perform_layout(clamp, ctx)
   }
 
+  fn visual_box(&self, host: &dyn Render, ctx: &mut VisualCtx) -> Option<Rect> {
+    host
+      .visual_box(ctx)
+      .map_or(Some(Rect::from_size(ctx.box_size().unwrap())), |rect| {
+        Some(self.transform.outer_transformed_rect(&rect))
+      })
+  }
+
   fn paint(&self, host: &dyn Render, ctx: &mut PaintingCtx) {
     ctx.painter().apply_transform(&self.transform);
     host.paint(ctx)
   }
 
-  fn hit_test(&self, host: &dyn Render, ctx: &HitTestCtx, pos: Point) -> HitTest {
+  fn hit_test(&self, host: &dyn Render, ctx: &mut HitTestCtx, pos: Point) -> HitTest {
     if let Some(t) = self.transform.inverse() {
       let lt = ctx.box_pos().unwrap();
       let pos = (pos - lt).to_point();

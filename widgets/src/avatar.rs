@@ -37,7 +37,7 @@ pub struct AvatarStyle {
 }
 
 impl CustomStyle for AvatarStyle {
-  fn default_style(ctx: &impl ProviderCtx) -> Self {
+  fn default_style(ctx: &impl AsRef<ProviderCtx>) -> Self {
     AvatarStyle {
       size: Size::splat(40.),
       radius: Some(20.),
@@ -69,10 +69,13 @@ impl ComposeChild<'static> for Avatar {
       let palette2 = Palette::of(ctx).clone();
       let w: Widget = match child {
         AvatarTemplate::Text(text) => {
-          @Container {
-            size,
-            border_radius: radius.map(Radius::all),
+          let mut container = @Container { size };
+          if let Some(radius) = radius {
+            container = container.radius(Radius::all(radius));
+          }
+          @ $container {
             background: pipe!(Brush::from(palette1.base_of(&$this.color))),
+            clip_boundary: true,
             @Text {
               h_align: HAlign::Center,
               v_align: VAlign::Center,
@@ -89,7 +92,7 @@ impl ComposeChild<'static> for Avatar {
               &Rect::from_size(size),
               &Radius::all(radius),
             );
-            Clip { clip: ClipType::Path(path) }
+            Clip { clip_path: path }
           });
           @$clip {
             @Container {

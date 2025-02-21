@@ -285,6 +285,7 @@ impl<'c> ComposeChild<'c> for ListItem {
               flex: 1.,
               @ $label_gap {
                 @Column {
+                  clip_boundary: true,
                   @Text {
                     text: headline.0.0,
                     foreground: Palette::of(ctx).on_surface(),
@@ -338,7 +339,7 @@ pub struct ListItemStyle {
 }
 
 impl CustomStyle for ListItemStyle {
-  fn default_style(ctx: &impl ProviderCtx) -> Self {
+  fn default_style(ctx: &impl AsRef<ProviderCtx>) -> Self {
     let typography = TypographyTheme::of(ctx);
     let palette = Palette::of(ctx);
     ListItemStyle {

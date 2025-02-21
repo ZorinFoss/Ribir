@@ -45,17 +45,18 @@ pub(crate) struct WriterInfo {
 
 impl<W: 'static> StateReader for Stateful<W> {
   type Value = W;
-  type OriginReader = Self;
   type Reader = Reader<W>;
 
   #[inline]
   fn read(&self) -> ReadRef<Self::Value> { self.data.read() }
 
   #[inline]
-  fn clone_reader(&self) -> Self::Reader { Reader(self.data.clone()) }
+  fn clone_boxed_reader(&self) -> Box<dyn StateReader<Value = Self::Value>> {
+    Box::new(self.clone_reader())
+  }
 
   #[inline]
-  fn origin_reader(&self) -> &Self::OriginReader { self }
+  fn clone_reader(&self) -> Self::Reader { Reader(self.data.clone()) }
 
   fn try_into_value(self) -> Result<W, Self> {
     if self.data.ref_count() == 1 {
@@ -71,16 +72,25 @@ impl<W: 'static> StateReader for Stateful<W> {
 }
 
 impl<W: 'static> StateWatcher for Stateful<W> {
+  type Watcher = Watcher<Self::Reader>;
+
+  #[inline]
+  fn clone_boxed_watcher(&self) -> Box<dyn StateWatcher<Value = Self::Value>> {
+    Box::new(self.clone_watcher())
+  }
+
   #[inline]
   fn raw_modifies(&self) -> CloneableBoxOp<'static, ModifyScope, Infallible> {
     self.info.notifier.raw_modifies()
   }
+
+  #[inline]
+  fn clone_watcher(&self) -> Watcher<Self::Reader> {
+    Watcher::new(self.clone_reader(), self.raw_modifies())
+  }
 }
 
 impl<W: 'static> StateWriter for Stateful<W> {
-  type Writer = Self;
-  type OriginWriter = Self;
-
   fn into_reader(self) -> Result<Self::Reader, Self>
   where
     Self: Sized,
@@ -98,25 +108,28 @@ impl<W: 'static> StateWriter for Stateful<W> {
   fn shallow(&self) -> WriteRef<W> { self.write_ref(ModifyScope::FRAMEWORK) }
 
   #[inline]
-  fn clone_writer(&self) -> Self::Writer { self.clone() }
+  fn clone_boxed_writer(&self) -> Box<dyn StateWriter<Value = Self::Value>> {
+    Box::new(self.clone_writer())
+  }
 
   #[inline]
-  fn origin_writer(&self) -> &Self::OriginWriter { self }
+  fn clone_writer(&self) -> Self { self.clone() }
 }
 
 impl<W: 'static> StateReader for Reader<W> {
   type Value = W;
-  type OriginReader = Self;
   type Reader = Self;
 
   #[inline]
   fn read(&self) -> ReadRef<W> { self.0.read() }
 
   #[inline]
-  fn clone_reader(&self) -> Self { Reader(self.0.clone()) }
+  fn clone_boxed_reader(&self) -> Box<dyn StateReader<Value = Self::Value>> {
+    Box::new(self.clone_reader())
+  }
 
   #[inline]
-  fn origin_reader(&self) -> &Self::OriginReader { self }
+  fn clone_reader(&self) -> Self { Reader(self.0.clone()) }
 
   fn try_into_value(self) -> Result<Self::Value, Self> {
     if self.0.ref_count() == 1 {
@@ -149,6 +162,17 @@ impl<W> Stateful<W> {
     Self { data: Sc::new(StateCell::new(data)), info: Sc::new(WriterInfo::new()) }
   }
 
+  pub fn from_pipe(p: impl Pipe<Value = W>) -> (Self, BoxSubscription<'static>)
+  where
+    Self: 'static,
+  {
+    let (v, p) = p.unzip(ModifyScope::DATA, None);
+    let s = Stateful::new(v);
+    let s2 = s.clone_writer();
+    let u = p.subscribe(move |(_, v)| *s2.write() = v);
+    (s, u)
+  }
+
   fn write_ref(&self, scope: ModifyScope) -> WriteRef<'_, W> {
     let value = self.data.write();
     WriteRef { value, modified: false, modify_scope: scope, info: &self.info }
@@ -178,7 +202,10 @@ impl<W: Render + 'static> IntoWidgetStrict<'static, RENDER> for Stateful<W> {
   fn into_widget_strict(self) -> Widget<'static> { WriterRender(self).into_widget() }
 }
 
-impl<W: Compose + 'static> IntoWidgetStrict<'static, COMPOSE> for Stateful<W> {
+impl<W: Compose + 'static, T> IntoWidgetStrict<'static, COMPOSE> for T
+where
+  T: StateWriter<Value = W>,
+{
   fn into_widget_strict(self) -> Widget<'static> { Compose::compose(self) }
 }
 
@@ -265,7 +292,7 @@ mod tests {
     {
       drop_writer_subscribe(
         #[allow(clippy::redundant_closure)]
-        Stateful::new(()).map_writer(|v| PartData::from_ref_mut(v)),
+        Stateful::new(()).map_writer(|v| PartMut::new(v)),
         drop_cnt.clone(),
       );
     };
@@ -275,7 +302,7 @@ mod tests {
     {
       drop_writer_subscribe(
         #[allow(clippy::redundant_closure)]
-        Stateful::new(()).split_writer(|v| PartData::from_ref_mut(v)),
+        Stateful::new(()).split_writer(|v| PartMut::new(v)),
         drop_cnt.clone(),
       );
     };

@@ -7,7 +7,7 @@ pub(super) fn init(classes: &mut Classes) {
   classes.insert(RADIO, |w| {
     let hover_layer = HoverLayer::tracked(LayerArea::WidgetCover(md::RADIUS_20));
     ripple! {
-      radius: 20.,
+      ripple_radius: 20.,
       center: true,
       cursor: CursorIcon::Pointer,
       @ $hover_layer {
@@ -18,7 +18,9 @@ pub(super) fn init(classes: &mut Classes) {
     .into_widget()
   });
 
-  fn icon_with_ripple<'w>(icon: Widget<'w>, ripple: Widget<'w>, foreground: Color) -> Widget<'w> {
+  fn icon_with_ripple<'w>(
+    icon: Widget<'w>, ripple: Widget<'w>, foreground: DeclareInit<Brush>,
+  ) -> Widget<'w> {
     stack! {
       margin: md::EDGES_4,
       foreground,
@@ -33,12 +35,11 @@ pub(super) fn init(classes: &mut Classes) {
   }
 
   classes.insert(RADIO_SELECTED, |ripple| {
-    let color = BuildCtx::get().variant_color();
     let icon = rdl! {
       let  w = @Container {
         size: md::SIZE_10,
-        background: color,
-        border_radius: md::RADIUS_5,
+        background: BuildCtx::color(),
+        radius: md::RADIUS_5,
         h_align: HAlign::Center,
         v_align: VAlign::Center,
       };
@@ -52,22 +53,22 @@ pub(super) fn init(classes: &mut Classes) {
       };
       @Container {
         size: md::SIZE_20,
-        border: md::border_variant_color_2(),
-        border_radius: md::RADIUS_10,
+        border: md::border_2(),
+        radius: md::RADIUS_10,
         on_mounted: move |_| scale_in.run(),
         @ { w }
       }
     };
 
-    icon_with_ripple(icon.into_widget(), ripple, color)
+    icon_with_ripple(icon.into_widget(), ripple, BuildCtx::color().declare_into())
   });
   classes.insert(RADIO_UNSELECTED, |ripple| {
     let foreground = Palette::of(BuildCtx::get()).on_surface_variant();
     let icon = container! {
       size: md::SIZE_20,
-      border: md::border_on_surface_variant_2(),
-      border_radius: md::RADIUS_10,
+      border: md::border_2_surface_color(),
+      radius: md::RADIUS_10,
     };
-    icon_with_ripple(icon.into_widget(), ripple, foreground)
+    icon_with_ripple(icon.into_widget(), ripple, foreground.declare_into())
   });
 }

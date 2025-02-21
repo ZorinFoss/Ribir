@@ -1,9 +1,10 @@
 use ribir_geom::{Point, Size};
-use ribir_painter::{PaintingStyle, TextStyle};
 
 use super::{WidgetCtx, WidgetCtxImpl};
 use crate::{
-  widget::{BoxClamp, WidgetTree},
+  context::VisualCtx,
+  prelude::ProviderCtx,
+  widget::{BoxClamp, VisualBox, WidgetTree},
   widget_tree::WidgetId,
   window::DelayEvent,
 };
@@ -18,8 +19,7 @@ pub struct LayoutCtx<'a> {
   /// The widget tree of the window, not borrow it from `wnd` is because a
   /// `LayoutCtx` always in a mutable borrow.
   pub(crate) tree: &'a mut WidgetTree,
-  painting_style: PaintingStyle,
-  text_style: TextStyle,
+  pub(crate) provider_ctx: ProviderCtx,
 }
 
 impl<'a> WidgetCtxImpl for LayoutCtx<'a> {
@@ -32,17 +32,12 @@ impl<'a> WidgetCtxImpl for LayoutCtx<'a> {
 
 impl<'a> LayoutCtx<'a> {
   pub(crate) fn new(id: WidgetId, tree: &'a mut WidgetTree) -> Self {
-    let painting_style = if let Some(style) = id.query_ancestors_ref::<PaintingStyle>(tree) {
-      style.clone()
+    let provider_ctx = if let Some(p) = id.parent(tree) {
+      ProviderCtx::collect_from(p, tree)
     } else {
-      PaintingStyle::Fill
+      ProviderCtx::default()
     };
-    let text_style = id
-      .query_ancestors_ref::<TextStyle>(tree)
-      .unwrap()
-      .clone();
-
-    Self { id, tree, painting_style, text_style }
+    Self { id, tree, provider_ctx }
   }
 
   /// Perform layout of the widget of the context and return its size.
@@ -52,25 +47,30 @@ impl<'a> LayoutCtx<'a> {
     let tree2 = unsafe { &*(self.tree as *mut WidgetTree) };
 
     let id = self.id();
-    let w = id.assert_get(tree2);
-    let size = w.perform_layout(clamp, self);
 
+    debug_assert!(clamp.min.is_finite());
+    let size = id.assert_get(tree2).perform_layout(clamp, self);
+    debug_assert!(size.is_finite());
+    let info = self.tree.store.layout_info_or_default(id);
+    info.clamp = clamp;
+    info.size = Some(size);
+
+    {
+      VisualCtx::from_layout_ctx(self).update_visual_box();
+    }
+
+    self.provider_ctx.pop_providers_for(self.id());
     self
       .window()
       .add_delay_event(DelayEvent::PerformedLayout(id));
 
-    let info = self.tree.store.layout_info_or_default(id);
-    info.clamp = clamp;
-    info.size = Some(size);
     size
   }
 
   /// Perform layout of the `child` and return its size.
   pub fn perform_child_layout(&mut self, child: WidgetId, clamp: BoxClamp) -> Size {
-    let info = self.tree.store.layout_info(child);
-    info
-      .filter(|info| info.clamp == clamp)
-      .and_then(|info| info.size)
+    self
+      .get_calculated_size(child, clamp)
       .unwrap_or_else(|| {
         // The position needs to be reset, as some parent render widgets may not have
         // set the position.
@@ -150,17 +150,25 @@ impl<'a> LayoutCtx<'a> {
     self.tree.store.force_layout(child).is_some()
   }
 
-  pub fn set_painting_style(&mut self, style: PaintingStyle) -> PaintingStyle {
-    std::mem::replace(&mut self.painting_style, style)
+  fn get_calculated_size(&self, child: WidgetId, clamp: BoxClamp) -> Option<Size> {
+    let info = self.tree.store.layout_info(child)?;
+    if info.clamp == clamp { info.size } else { None }
   }
 
-  pub fn painting_style(&self) -> &PaintingStyle { &self.painting_style }
-
-  pub fn set_text_style(&mut self, style: TextStyle) -> TextStyle {
-    std::mem::replace(&mut self.text_style, style)
+  pub(crate) fn visual_box(&mut self, id: WidgetId) -> VisualBox {
+    let info = self.tree.store.layout_info_or_default(id);
+    info.visual_box
   }
 
-  pub fn text_style(&self) -> &TextStyle { &self.text_style }
+  pub(crate) fn update_visual_box(&mut self) -> VisualBox {
+    VisualCtx::from_layout_ctx(self).update_visual_box()
+  }
+}
 
-  pub fn text_style_mut(&mut self) -> &mut TextStyle { &mut self.text_style }
+impl<'w> AsRef<ProviderCtx> for LayoutCtx<'w> {
+  fn as_ref(&self) -> &ProviderCtx { &self.provider_ctx }
+}
+
+impl<'w> AsMut<ProviderCtx> for LayoutCtx<'w> {
+  fn as_mut(&mut self) -> &mut ProviderCtx { &mut self.provider_ctx }
 }

@@ -41,7 +41,14 @@ impl<T: SingleChild> SingleChild for FatObj<T> {
       .into_widget()
   }
 
-  fn into_parent(self: Box<Self>) -> Widget<'static> { self.into_widget() }
+  fn into_parent(self: Box<Self>) -> Widget<'static> {
+    let this = *self;
+    if !this.has_class() {
+      this.into_widget()
+    } else {
+      panic!("A FatObj should not have a class attribute when acting as a single parent")
+    }
+  }
 }
 
 macro_rules! impl_single_child_methods_for_pipe {
@@ -137,11 +144,7 @@ impl SingleChild for Box<dyn SingleChild> {
 }
 
 pub fn compose_single_child<'c>(parent: Widget<'c>, child: Option<Widget<'c>>) -> Widget<'c> {
-  let f = move || {
-    if let Some(child) = child { parent.directly_compose_children(vec![child]) } else { parent }
-  };
-
-  f.into_widget()
+  if let Some(child) = child { Widget::new(parent, vec![child]) } else { parent }
 }
 #[cfg(test)]
 mod tests {

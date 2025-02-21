@@ -25,6 +25,93 @@ Please only add new entries below the [Unreleased](#unreleased---releasedate) he
 
 ## [@Unreleased] - @ReleaseDate
 
+### Features
+- **core**: record the visual rect after layout.(#698 @wjian23)
+
+### Fixed
+- **core**: fix miss pop providers when call `push_providers_for` separately during layout.(#698 @wjian23)
+
+## [0.4.0-alpha.27] - 2025-02-12
+
+### Features
+
+- **core**: Add the ability to force redraw a frame. (#697 @zihadmahiuddin)
+
+
+### Fixed
+
+- **core**: Fix window staying empty after switching workspace (e.g. in i3wm) by doing a force redraw. (#697 @zihadmahiuddin)
+
+## [0.4.0-alpha.26] - 2025-02-05
+
+### Fixed
+
+- **widgets**: Ensure that the `Flex` expands items only after allocating space to all items, prioritizing the display of items in full initially. (#696 @M-Adoo)
+
+## [0.4.0-alpha.25] - 2025-01-29
+
+### Features
+
+- **core**: Add builtin field `clip_boundary`. (#694 @wjian23)
+- **core**: `IgnorePointer` now has the ability to only ignore events for the widget itself. (#695 @M-Adoo)
+- **core**: Included `BoxPainter` to draw decorations starting from the widget box's origin while ignoring padding. (#695 @M-Adoo)
+
+### Changed 
+
+- **macros**: Generate cleaner code for #[derive(Declare)] when all fields are omitted. (#695 @M-Adoo)
+
+### Fixed
+
+- **core & widgets**: Layouts are not permitted to return an infinite size, so if a layout requires scaling or expanding the size infinitely, that action should be disregarded. (#695 @M-Adoo)
+- **macros**: Embedding `fn_widget!` may lead to missed captured variables. (#695 @M-Adoo)
+- **core**: The child should not be painted when visible is false. (#695 @M-Adoo)
+- **core**: Ensure that the content widget size in the scrollable widget is not smaller than its viewport. (#695 @M-Adoo)
+- **core**: The crash occurs when a parent widget with a class tries to convert the widget with more than one leaf. (#695 @M-Adoo)
+- **core**: The padding only reduces the content size and does not affect the border and background size. (#695 @M-Adoo)
+
+## [0.4.0-alpha.24] - 2025-01-22
+
+### Features
+
+- **core**: ensure object safety of `StateReader`， `StateWatcher` and `StateWriter` (#692 @M-Adoo)
+- **core**: Support extend custom event. (#684 @wjian23)
+- **core**: Added `map_watcher` to `StateWatcher` (#684 @wjian23)
+- **core**: Added `visible_widget` and ScrollableProvider to ScrollableWidget, to support descendant to be showed.(#684 @wjian23)
+
+### Changed
+
+- **core**: Unified implementation of IntoWidget for impl StateWriter<V:Compose>. (#684 @wjian23)
+- **widgets**: Refactor `Input` Widget. (#684 @wjian23)
+
+### Breading
+
+- **core**: Rename `can_focus` field of FocusScope to `skip_host`. (#684 @wjian23)
+
+## [0.4.0-alpha.23] - 2025-01-15
+
+### Features
+
+- **core**: The `Render::dirty_phase` method has been added to allow widgets to mark only the paint phase as dirty when it is modified. (#689 @M-Adoo)
+- **core**: Supports `Provider` to dirty the tree if it's a state writer. (#689 @M-Adoo)
+- **core**: Added the built-in field `providers` to provide data to its descendants. (#690 @M-Adoo)
+- **core**: Added `Variant` to support building widgets with variables across `Providers`. (#690 @M-Adoo)
+- **macros**: Added the `part_reader!` macro to generate a partial reader from a reference of a reader. (#688 @M-Adoo)
+- **macros**: The `simple_declare` now supports the `stateless` meta attribute, `#[simple_declare(stateless)]`. (#688 @M-Adoo)
+
+### Changed
+
+- **widgets**: Replace `BoxDecoration` with three separate widgets: `BorderWidget`, `RadiusWidget`, and `Background`. (#691 @M-Adoo)
+
+### Fixed
+
+- **Core**: `PartData` allows the use of a reference to create a write reference, which is unsafe. Introduce `PartRef` and `PartMut` to replace it. (#690 @M-Adoo)
+
+
+### Breading
+
+- **core**: Removed `PartData`. (#690 @M-Adoo)
+- **core**: Removed `BoxDecoration`. (#691 @M-Adoo)
+
 ## [0.4.0-alpha.22] - 2025-01-08
 
 ### Fixed
@@ -36,6 +123,7 @@ Please only add new entries below the [Unreleased](#unreleased---releasedate) he
 ### Fixed
 
 - **core**: The animation finish may miss drawing the last frame. (#682 @M-Adoo)
+
 
 ## [0.4.0-alpha.20] - 2024-12-25
 
@@ -56,7 +144,6 @@ Please only add new entries below the [Unreleased](#unreleased---releasedate) he
 - **core**: Fix TextStyle cause providers mismatched (#671 @wjian23)
 - **core**: Running an animation that is already in progress does not trigger a smooth transition. (#672 @M-Adoo)
 - **core**: The framework incorrectly clamps the layout result of the render widget. (#672 @M-Adoo)
-- **core**: Padding will not change the child's size; otherwise, child elements like `Icon` may not work correctly. (#674 @M-Adoo)
 - **core**: Allow children to be hit outside their parent's boundaries for non-fixed-size containers. (#676 @M-Adoo)
 - **painter**: Fixed text line height does not work correctly. (#674 @M-Adoo)
 - **painter**: Fixed issue with text not being drawn at the middle baseline by default. (#674 @M-Adoo)
@@ -96,7 +183,6 @@ Please only add new entries below the [Unreleased](#unreleased---releasedate) he
 - **core**: Added the `named_svgs` module to enable sharing SVGs using string keys, replacing the need for `IconTheme`. (#658 @M-Adoo)
 - **core**: The `keyframes!` macro has been introduced to manage the intermediate steps of animation states. (#653 @M-Adoo)
 - **core**: Added `QueryId` as a replacement for `TypeId` to facilitate querying types by Provider across different binaries. (#656 @M-Adoo)
-- **core**: Added `OverrideClass` to override a single class within a subtree. (#657 @M-Adoo)
 - **widgets**: Added `LinearProgress` and `SpinnerProgress` widgets along with their respective material themes. (#630 @wjian23 @M-Adoo)
 - **painter**: SVG now supports switching the default color, allowing for icon color changes. (#661 @M-Adoo)
 
@@ -281,7 +367,9 @@ Please only add new entries below the [Unreleased](#unreleased---releasedate) he
 - **core**: Added `Provider` widget to share data between sub-tree. (#618 @M-Adoo)
 
   ```rust
-  Provider::new(Box::new(State::value(0i32))).with_child(fn_widget! {
+  let state = Stateful::value(0132);
+  providers!{
+    providers: [Provider::value_of_reader(state)],
     @SizedBox {
       size: Size::new(1.,1.),
       on_tap: |e| {
@@ -292,15 +380,14 @@ Please only add new entries below the [Unreleased](#unreleased---releasedate) he
       @Text {
         text: {
           // Access the provider in any descendants
-          let v = Provider::of::<Stateful<i32>>(ctx!());
+          let v = Provider::state_of::<Stateful<i32>>(BuildCtx::get());
           let v = v.unwrap().clone_writer();
           pipe!($v.to_string())
         }
       }
     }
-  });
+  }
   ```
-
 - **core**: Added `Overlay::of` to allow querying the overlay in event callbacks. (#618 @M-Adoo)
 - **core**: Added `WidgetCtx::query`, `WidgetCtx::query_write`, `WidgetCtx::query_of_widget` and  `WidgetCtx::query_write_of_widget`. (#618 @M-Adoo)
 
@@ -576,7 +663,12 @@ We are very happy to share it with you. We hope you can try it out and give us f
 - **get started**: add the `get_started` series of tutorials to help users get started with Ribir.
 
 <!-- next-url -->
-[@Unreleased]: https://github.com/RibirX/Ribir/compare/ribir-v0.4.0-alpha.22...HEAD
+[@Unreleased]: https://github.com/RibirX/Ribir/compare/ribir-v0.4.0-alpha.27...HEAD
+[0.4.0-alpha.27]: https://github.com/RibirX/Ribir/compare/ribir-v0.4.0-alpha.26...ribir-v0.4.0-alpha.27
+[0.4.0-alpha.26]: https://github.com/RibirX/Ribir/compare/ribir-v0.4.0-alpha.25...ribir-v0.4.0-alpha.26
+[0.4.0-alpha.25]: https://github.com/RibirX/Ribir/compare/ribir-v0.4.0-alpha.24...ribir-v0.4.0-alpha.25
+[0.4.0-alpha.24]: https://github.com/RibirX/Ribir/compare/ribir-v0.4.0-alpha.23...ribir-v0.4.0-alpha.24
+[0.4.0-alpha.23]: https://github.com/RibirX/Ribir/compare/ribir-v0.4.0-alpha.22...ribir-v0.4.0-alpha.23
 [0.4.0-alpha.22]: https://github.com/RibirX/Ribir/compare/ribir-v0.4.0-alpha.21...ribir-v0.4.0-alpha.22
 [0.4.0-alpha.21]: https://github.com/RibirX/Ribir/compare/ribir-v0.4.0-alpha.20...ribir-v0.4.0-alpha.21
 [0.4.0-alpha.20]: https://github.com/RibirX/Ribir/compare/ribir-v0.4.0-alpha.19...ribir-v0.4.0-alpha.20

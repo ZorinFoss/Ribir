@@ -14,7 +14,9 @@ use crate::prelude::*;
 /// child size, it can be implemented as a `WrapRender` instead of `Render`,
 /// eliminating the need to allocate a node in the widget tree.
 pub trait WrapRender {
-  fn perform_layout(&self, clamp: BoxClamp, host: &dyn Render, ctx: &mut LayoutCtx) -> Size;
+  fn perform_layout(&self, clamp: BoxClamp, host: &dyn Render, ctx: &mut LayoutCtx) -> Size {
+    host.perform_layout(clamp, ctx)
+  }
 
   fn paint(&self, host: &dyn Render, ctx: &mut PaintingCtx) { host.paint(ctx) }
 
@@ -23,13 +25,19 @@ pub trait WrapRender {
     host.only_sized_by_parent()
   }
 
-  fn hit_test(&self, host: &dyn Render, ctx: &HitTestCtx, pos: Point) -> HitTest {
+  fn hit_test(&self, host: &dyn Render, ctx: &mut HitTestCtx, pos: Point) -> HitTest {
     host.hit_test(ctx, pos)
   }
 
   fn get_transform(&self, host: &dyn Render) -> Option<Transform> { host.get_transform() }
 
-  fn combine_child(this: impl StateWriter<Value = Self>, mut child: Widget) -> Widget
+  fn visual_box(&self, host: &dyn Render, ctx: &mut VisualCtx) -> Option<Rect> {
+    host.visual_box(ctx)
+  }
+
+  fn combine_child(
+    this: impl StateWriter<Value = Self>, mut child: Widget, dirty: DirtyPhase,
+  ) -> Widget
   where
     Self: Sized + 'static,
   {
@@ -39,7 +47,7 @@ pub trait WrapRender {
         let reader = match this.into_reader() {
           Ok(r) => r,
           Err(s) => {
-            child = child.dirty_on(s.raw_modifies());
+            child = child.dirty_on(s.raw_modifies(), dirty);
             s.clone_reader()
           }
         };
@@ -75,12 +83,6 @@ impl Query for RenderPair {
     self.host.query_write(query_id)
   }
 
-  fn query_match(
-    &self, ids: &[QueryId], filter: &dyn Fn(&QueryId, &QueryHandle) -> bool,
-  ) -> Option<(QueryId, QueryHandle)> {
-    self.host.query_match(ids, filter)
-  }
-
   fn queryable(&self) -> bool { self.host.queryable() }
 }
 
@@ -91,6 +93,12 @@ impl Render for RenderPair {
       .perform_layout(clamp, self.host.as_render(), ctx)
   }
 
+  fn visual_box(&self, ctx: &mut VisualCtx) -> Option<Rect> {
+    self
+      .wrapper
+      .visual_box(self.host.as_render(), ctx)
+  }
+
   fn paint(&self, ctx: &mut PaintingCtx) { self.wrapper.paint(self.host.as_render(), ctx); }
 
   fn only_sized_by_parent(&self) -> bool {
@@ -99,11 +107,13 @@ impl Render for RenderPair {
       .only_sized_by_parent(self.host.as_render())
   }
 
-  fn hit_test(&self, ctx: &HitTestCtx, pos: Point) -> HitTest {
+  fn hit_test(&self, ctx: &mut HitTestCtx, pos: Point) -> HitTest {
     self
       .wrapper
       .hit_test(self.host.as_render(), ctx, pos)
   }
+
+  fn dirty_phase(&self) -> DirtyPhase { self.host.dirty_phase() }
 
   fn get_transform(&self) -> Option<Transform> { self.wrapper.get_transform(self.host.as_render()) }
 }
@@ -123,22 +133,26 @@ where
     self.read().only_sized_by_parent(host)
   }
 
-  fn hit_test(&self, host: &dyn Render, ctx: &HitTestCtx, pos: Point) -> HitTest {
+  fn hit_test(&self, host: &dyn Render, ctx: &mut HitTestCtx, pos: Point) -> HitTest {
     self.read().hit_test(host, ctx, pos)
   }
 
   fn get_transform(&self, host: &dyn Render) -> Option<Transform> {
     self.read().get_transform(host)
   }
+
+  fn visual_box(&self, host: &dyn Render, ctx: &mut VisualCtx) -> Option<Rect> {
+    self.read().visual_box(host, ctx)
+  }
 }
 
 #[macro_export]
 macro_rules! impl_compose_child_for_wrap_render {
-  ($name:ty) => {
+  ($name:ty, $dirty:expr) => {
     impl<'c> ComposeChild<'c> for $name {
       type Child = Widget<'c>;
       fn compose_child(this: impl StateWriter<Value = Self>, child: Self::Child) -> Widget<'c> {
-        WrapRender::combine_child(this, child)
+        WrapRender::combine_child(this, child, $dirty)
       }
     }
   };

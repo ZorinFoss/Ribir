@@ -16,24 +16,59 @@ pub struct Text {
   glyphs: RefCell<Option<VisualGlyphs>>,
 }
 
+pub fn text_glyph(
+  text: Substr, text_style: &TextStyle, text_align: TextAlign, bounds: Size,
+) -> VisualGlyphs {
+  AppCtx::typography_store()
+    .borrow_mut()
+    .typography(
+      text,
+      text_style,
+      bounds,
+      text_align,
+      GlyphBaseline::Middle,
+      PlaceLineDirection::TopToBottom,
+    )
+}
+
+pub fn paint_text(
+  painter: &mut Painter, glyphs: &VisualGlyphs, style: PaintingStyle, box_rect: Rect,
+) {
+  if let Some(rect) = painter.intersection_paint_bounds(&box_rect) {
+    if let PaintingStyle::Stroke(options) = style {
+      painter
+        .set_style(PathStyle::Stroke)
+        .set_strokes(options);
+    } else {
+      painter.set_style(PathStyle::Fill);
+    }
+
+    let font_db = AppCtx::font_db().clone();
+    painter.draw_glyphs_in_rect(glyphs, rect, &font_db.borrow());
+  }
+}
+
 impl Render for Text {
   fn perform_layout(&self, clamp: BoxClamp, ctx: &mut LayoutCtx) -> Size {
-    let style = ctx.text_style();
-    let info = AppCtx::typography_store()
-      .borrow_mut()
-      .typography(
-        self.text.substr(..),
-        style,
-        clamp.max,
-        self.text_align,
-        GlyphBaseline::Middle,
-        PlaceLineDirection::TopToBottom,
-      );
+    let style = Provider::of::<TextStyle>(ctx).unwrap();
 
-    let size = info.visual_rect().size;
-    *self.glyphs.borrow_mut() = Some(info);
+    let glyphs = text_glyph(self.text.substr(..), &style, self.text_align, clamp.max);
+
+    let size = glyphs.visual_rect().size;
+    *self.glyphs.borrow_mut() = Some(glyphs);
 
     clamp.clamp(size)
+  }
+
+  fn visual_box(&self, _: &mut VisualCtx) -> Option<Rect> {
+    Some(
+      self
+        .glyphs
+        .borrow()
+        .as_ref()
+        .map(|info| info.visual_rect())
+        .unwrap_or_default(),
+    )
   }
 
   #[inline]
@@ -49,11 +84,10 @@ impl Render for Text {
       return;
     };
 
+    let style = Provider::of::<PaintingStyle>(ctx).map(|p| p.clone());
     let visual_glyphs = self.glyphs().unwrap();
-    let font_db = AppCtx::font_db().clone();
-    ctx
-      .painter()
-      .draw_glyphs_in_rect(&visual_glyphs, box_rect, &font_db.borrow());
+    let rect = visual_glyphs.visual_rect();
+    paint_text(ctx.painter(), &visual_glyphs, style.unwrap_or(PaintingStyle::Fill), rect);
   }
 }
 
@@ -104,8 +138,9 @@ mod tests {
   widget_test_suit!(
     text_clip,
     WidgetTester::new(fn_widget! {
-      @ MockBox {
+      @MockBox {
         size: Size::new(50., 45.),
+        clip_boundary: true,
         @Text {
           text: "hello world,\rnice to meet you.",
         }
@@ -134,7 +169,7 @@ mod tests {
   widget_image_tests!(
     middle_baseline,
     WidgetTester::new(self::column! {
-      item_gap: 8.,
+      justify_content: JustifyContent::SpaceBetween,
       @Text {
         text: "Baseline check!",
         font_size: 20.,
@@ -143,12 +178,13 @@ mod tests {
       }
       @Text {
         text: "Text line height check!",
+        clip_boundary: true,
         font_size: 20.,
         text_line_height: 40.,
         background: Color::GREEN,
       }
     })
     .with_wnd_size(WND_SIZE)
-    .with_comparison(0.00004)
+    .with_comparison(0.0001)
   );
 }

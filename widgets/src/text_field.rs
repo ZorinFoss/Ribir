@@ -22,10 +22,9 @@ pub struct TextFieldTml<'w> {
   /// a text field.
   label: Option<Label>,
 
-  /// The placeholder text is displayed in the input field before the user
-  /// enters a value.
-  placeholder: Option<Placeholder>,
-
+  // /// The placeholder text is displayed in the input field before the user
+  // /// enters a value.
+  // placeholder: Option<Placeholder>,
   /// Use prefix text before the editable text to show symbols or abbreviations
   /// that help users enter the right type of information in a form’s text
   /// input
@@ -176,7 +175,7 @@ pub enum TextFieldState {
 }
 
 impl CustomStyle for TextFieldThemeSuit {
-  fn default_style(ctx: &impl ProviderCtx) -> Self {
+  fn default_style(ctx: &impl AsRef<ProviderCtx>) -> Self {
     Self::from_theme(&Palette::of(ctx), &TypographyTheme::of(ctx))
   }
 }
@@ -312,19 +311,21 @@ impl<'c> ComposeChild<'c> for TextField {
 }
 
 fn build_input_area(
-  this: impl StateWriter<Value = TextField> + 'static, theme: State<TextFieldThemeProxy>,
-  prefix: Option<Leading<Label>>, suffix: Option<Trailing<Label>>,
-  placeholder: Option<Placeholder>,
+  this: impl StateWriter<Value = TextField> + 'static,
+  theme: State<TextFieldThemeProxy>,
+  prefix: Option<Leading<Label>>,
+  suffix: Option<Trailing<Label>>,
+  // placeholder: Option<Placeholder>,
 ) -> Widget<'static> {
   fn_widget! {
     let mut input_area = @Row {
       visible: pipe!(!$this.text.is_empty() || $theme.state == TextFieldState::Focused),
     };
     input_area.get_visibility_widget()
-      .map_writer(|w| PartData::from_ref(&w.visible))
+      .map_writer(|w| PartMut::new(&mut w.visible))
       .transition(transitions::LINEAR.of(BuildCtx::get()));
 
-    let mut input = @Input{ style: pipe!($theme.text.clone()) };
+    let mut input = @Input{ };
     $input.write().set_text(&$this.text);
 
     watch!($input.text().clone())
@@ -354,7 +355,7 @@ fn build_input_area(
       }
       @Expanded {
         flex: 1.,
-        @ $input { @{placeholder} }
+        @ $input { }
       }
       @{
         suffix.map(|s| @Text{
@@ -383,7 +384,7 @@ impl Compose for TextFieldLabel {
         text_style: pipe!($this.style.clone()),
       };
 
-      this.map_writer(|w| PartData::from_ref(&w.style.font_size))
+      this.map_writer(|w| PartMut::new(&mut w.style.font_size))
         .transition(transitions::LINEAR.of(BuildCtx::get()));
 
       label
@@ -397,14 +398,12 @@ fn build_content_area(
   mut config: TextFieldTml,
 ) -> Widget<'static> {
   fn_widget! {
-    take_option_field!({label, prefix, suffix, placeholder}, config);
+    take_option_field!({label, prefix, suffix}, config);
     let mut content_area = @Column {
       padding: pipe!($theme.input_padding($this.text.is_empty())),
     };
 
-    content_area
-      .get_padding_widget()
-      .map_writer(|w| PartData::from_ref(&w.padding))
+    part_writer!(&mut content_area.padding)
       .transition(transitions::LINEAR.of(BuildCtx::get()));
 
     @ $content_area {
@@ -417,7 +416,7 @@ fn build_content_area(
           }
         })
       }
-      @ { build_input_area(this, theme, prefix, suffix, placeholder)}
+      @ { build_input_area(this, theme, prefix, suffix)}
     }
   }
   .into_widget()

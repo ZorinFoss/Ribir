@@ -1,46 +1,33 @@
 #![allow(static_mut_refs)]
 use std::ptr::NonNull;
 
-use smallvec::SmallVec;
-use widget_id::{RenderQueryable, new_node};
-
 use crate::{local_sender::LocalSender, prelude::*};
 
 /// A context provide during build the widget tree.
 pub struct BuildCtx {
-  /// Widgets from the root widget to the current widget provide data that the
-  /// descendants can access.
-  pub(crate) providers: SmallVec<[WidgetId; 1]>,
-  /// Providers are available for the preallocated widget but have not been
-  /// attached yet.
-  pub(crate) current_providers: SmallVec<[Box<dyn Query>; 1]>,
-  pub(crate) tree: NonNull<WidgetTree>,
-  // Todo: Since `Theme`, `Palette`, `TypographyTheme` and `TextStyle` are frequently queried
-  // during the building process, layout and paint. we should cache the closest one.
+  tree: NonNull<WidgetTree>,
+  provider_ctx: ProviderCtx,
+  /// The stack is used to temporarily store the children's relationships
+  /// during the build process. The widget's lifetime remains valid throughout
+  /// this process; hence, we use 'static to avoid introducing a lifetime for
+  /// the BuildCtx.
+  children: Vec<(WidgetId, Widget<'static>)>,
 }
 
 impl BuildCtx {
   /// Return the window of this context is created from.
   pub fn window(&self) -> Sc<Window> { self.tree().window() }
 
-  pub fn text_style(&self) -> QueryRef<TextStyle> { Provider::of::<TextStyle>(self).unwrap() }
+  /// Return the variant of `Color` provided in the current build context.
+  pub fn color() -> Variant<Color> { Variant::new(BuildCtx::get()).unwrap() }
 
-  /// This method returns the color of the current build process, with the
-  /// primary color of the palette serving as the default.
-  ///
-  /// This color is used for interactions between the user and the widget theme.
-  /// For instance, the `Button` widget does not have a `color` property, but
-  /// its class utilizes the color returned by this method to style the button.
-  /// Therefore, users can modify this color to change the button's color
-  /// without having to override its class.
-  pub fn variant_color(&self) -> Color {
-    // todo: We have not yet enabled the ability to change the variant color. This
-    // method is provided for compatibility purposes now.
-    Palette::of(self).primary()
+  /// Return the variant of the `ContainerColor` provide in the current build
+  /// context and unwrap it as a `Color`.
+  pub fn container_color() -> VariantMap<ContainerColor, impl Fn(ContainerColor) -> Color> {
+    Variant::new(BuildCtx::get())
+      .unwrap()
+      .map(|c: ContainerColor| c.0)
   }
-
-  /// The container color of the variant color.
-  pub fn variant_container_color(&self) -> Color { Palette::of(self).secondary_container() }
 
   pub(crate) fn tree(&self) -> &WidgetTree {
     // Safety: Please refer to the comments in `WidgetTree::tree_mut` for more
@@ -57,8 +44,35 @@ impl BuildCtx {
     unsafe { tree.as_mut() }
   }
 
-  pub(crate) fn alloc(&mut self, node: Box<dyn RenderQueryable>) -> WidgetId {
-    new_node(&mut self.tree_mut().arena, node)
+  pub(crate) fn tree_ptr(&self) -> *mut WidgetTree { self.tree.as_ptr() }
+
+  pub(crate) fn build(&mut self, widget: Widget<'_>) -> WidgetId {
+    let size = self.children.len();
+    let root = widget.call(self);
+    loop {
+      if self.children.len() == size {
+        break;
+      }
+      if let Some((p, child)) = self.children.pop() {
+        let c = child.call(self);
+        p.append(c, self.tree_mut());
+      }
+    }
+
+    root
+  }
+
+  pub(crate) fn build_parent(&mut self, parent: Widget<'_>, children: Vec<Widget<'_>>) -> WidgetId {
+    let root = self.build(parent);
+    let p = root.single_leaf(self.tree_mut());
+    for c in children.into_iter().rev() {
+      // Safety: The child will not truly extend its lifetime to 'static; it only
+      // exists during the build process, and the parent's lifetime live longer than
+      // the build process.
+      let c: Widget<'static> = unsafe { std::mem::transmute(c) };
+      self.children.push((p, c));
+    }
+    root
   }
 }
 
@@ -105,22 +119,36 @@ impl BuildCtx {
 
   pub(crate) fn set_for(startup: WidgetId, tree: NonNull<WidgetTree>) {
     let t = unsafe { tree.as_ref() };
-    let mut providers: SmallVec<[WidgetId; 1]> = startup
-      .ancestors(t)
-      .filter(|id| id.queryable(t))
-      .collect();
-    providers.reverse();
-    let ctx = BuildCtx { tree, providers, current_providers: <_>::default() };
+    let provider_ctx = ProviderCtx::collect_from(startup, t);
+    let ctx = BuildCtx { tree, children: <_>::default(), provider_ctx };
+
     BuildCtx::set(ctx);
   }
 
   pub(crate) fn set(ctx: BuildCtx) { unsafe { CTX = Some(LocalSender::new(ctx)) } }
 
-  pub(crate) fn clear() { unsafe { CTX = None } }
+  pub(crate) fn clear() {
+    if let Some(ctx) = BuildCtx::try_get() {
+      assert!(ctx.children.is_empty());
+    }
+    unsafe { CTX = None }
+  }
+
+  pub(crate) fn empty(tree: NonNull<WidgetTree>) -> Self {
+    Self { tree, children: <_>::default(), provider_ctx: <_>::default() }
+  }
 }
 
 pub(crate) struct BuildCtxInitdGuard;
 
 impl Drop for BuildCtxInitdGuard {
   fn drop(&mut self) { BuildCtx::clear() }
+}
+
+impl AsRef<ProviderCtx> for BuildCtx {
+  fn as_ref(&self) -> &ProviderCtx { &self.provider_ctx }
+}
+
+impl AsMut<ProviderCtx> for BuildCtx {
+  fn as_mut(&mut self) -> &mut ProviderCtx { &mut self.provider_ctx }
 }

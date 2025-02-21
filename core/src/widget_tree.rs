@@ -1,4 +1,4 @@
-use std::{cell::RefCell, cmp::Reverse, collections::HashSet, mem::MaybeUninit};
+use std::{cell::RefCell, cmp::Reverse, collections::BTreeSet, mem::MaybeUninit};
 
 pub mod widget_id;
 use indextree::Arena;
@@ -10,7 +10,20 @@ pub use layout_info::*;
 use self::widget::widget_id::new_node;
 use crate::{overlay::ShowingOverlays, prelude::*, render_helper::PureRender, window::WindowId};
 
-pub(crate) type DirtySet = Sc<RefCell<HashSet<WidgetId, ahash::RandomState>>>;
+/// This enum defines the dirty phases of the widget.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum DirtyPhase {
+  /// Indicates that the widget requires a layout update.
+  Layout,
+  /// This indicates that the subtree needs to undergo a forced relayout,
+  /// primarily used for providers that may introduce layout constraints beyond
+  /// the parent level.
+  LayoutSubtree,
+  /// Indicates that the widget needs to be repainted.
+  Paint,
+}
+
+pub(crate) type DirtySet = Sc<RefCell<ahash::HashMap<WidgetId, DirtyPhase>>>;
 
 pub(crate) struct WidgetTree {
   pub(crate) root: WidgetId,
@@ -30,29 +43,25 @@ type TreeArena = Arena<Box<dyn RenderQueryable>>;
 impl WidgetTree {
   pub fn init(&mut self, wnd: &Window, content: GenWidget) -> WidgetId {
     self.root.0.remove_subtree(&mut self.arena);
-    let _guard = BuildCtx::init(BuildCtx {
-      tree: wnd.tree,
-      providers: <_>::default(),
-      current_providers: <_>::default(),
-    });
+    let _guard = BuildCtx::init(BuildCtx::empty(wnd.tree));
 
     let theme = AppCtx::app_theme().clone_writer();
-    let overlays = Queryable(ShowingOverlays::default());
-    let root = Provider::new(Box::new(overlays))
-      .with_child(fn_widget! {
-        theme.with_child(fn_widget!{
-          let overlays = Provider::of::<ShowingOverlays>(BuildCtx::get()).unwrap();
-          overlays.rebuild();
-          @Root {
-            @{ content.gen_widget() }
-          }
-        })
-      })
-      .into_widget()
-      .build();
+    let child = move || {
+      let overlays = Provider::of::<ShowingOverlays>(BuildCtx::get()).unwrap();
+      overlays.rebuild();
+      Root
+        .with_child(content.gen_widget())
+        .into_widget()
+    };
+
+    let (mut providers, child) = Theme::preprocess_before_compose(theme, child.into());
+    providers.push(Provider::new(ShowingOverlays::default()));
+
+    let root = Providers::new(providers).with_child(child);
+    let root = BuildCtx::get_mut().build(root);
 
     self.root = root;
-    self.dirty_marker().mark(root);
+    self.dirty_marker().mark(root, DirtyPhase::Layout);
     root.on_mounted_subtree(self);
     root
   }
@@ -68,17 +77,17 @@ impl WidgetTree {
     let wnd = self.window();
     let mut painter = wnd.painter.borrow_mut();
     let tree = wnd.tree();
-    let mut ctx = PaintingCtx::new(self.root(), tree, &mut painter);
-    self.root().paint_subtree(&mut ctx);
+    self.root().paint_subtree(tree, &mut painter);
   }
 
   /// Do the work of computing the layout for all node which need, Return if any
   /// node has really computing the layout.
   pub(crate) fn layout(&mut self, win_size: Size) {
     loop {
-      let Some(mut needs_layout) = self.layout_list() else {
+      let Some((mut needs_layout, mut needs_paint)) = self.layout_list() else {
         break;
       };
+      let mut visual_roots = BTreeSet::new();
       while let Some(wid) = needs_layout.pop() {
         if wid.is_dropped(self) {
           continue;
@@ -91,10 +100,41 @@ impl WidgetTree {
             .unwrap_or_else(|| BoxClamp { min: Size::zero(), max: win_size });
 
           let mut ctx = LayoutCtx::new(wid, self);
+          let visual_rect = ctx.visual_box(wid);
           ctx.perform_layout(clamp);
+          let new_rect = ctx.visual_box(wid);
+          if visual_rect != new_rect {
+            if let Some(parent) = wid.parent(self) {
+              let depth = parent.ancestors(self).count();
+              visual_roots.insert((depth, parent));
+            }
+          }
+        }
+      }
+
+      while let Some(wid) = needs_paint.pop() {
+        if wid.is_dropped(self) {
+          continue;
+        }
+        let depth = wid.ancestors(self).count();
+        visual_roots.insert((depth, wid));
+      }
+
+      while let Some((depth, wid)) = visual_roots.pop_first() {
+        let mut ctx = LayoutCtx::new(wid, self);
+        let visual_rect = ctx.visual_box(wid);
+        let new_rect = ctx.update_visual_box();
+        if visual_rect != new_rect {
+          if let Some(parent) = wid.parent(self) {
+            visual_roots.insert((depth - 1, parent));
+          }
         }
       }
     }
+  }
+
+  pub(crate) fn alloc_node(&mut self, node: Box<dyn RenderQueryable>) -> WidgetId {
+    new_node(&mut self.arena, node)
   }
 
   pub(crate) fn layout_info(&self, id: WidgetId) -> Option<&LayoutInfo> {
@@ -133,30 +173,34 @@ impl WidgetTree {
       self.display_node(prefix, c, display)
     });
   }
-  pub(crate) fn layout_list(&mut self) -> Option<Vec<WidgetId>> {
+  pub(crate) fn layout_list(&mut self) -> Option<(Vec<WidgetId>, Vec<WidgetId>)> {
     if self.dirty_set.borrow().is_empty() {
       return None;
     }
 
     let mut needs_layout = vec![];
+    let mut needs_paint = vec![];
 
-    let dirty_widgets = {
-      let mut state_changed = self.dirty_set.borrow_mut();
-      let dirty_widgets = state_changed.clone();
-      state_changed.clear();
-      dirty_widgets
-    };
-
-    for id in dirty_widgets.iter() {
+    for (id, dirty) in self.dirty_set.borrow_mut().drain() {
       if id.is_dropped(self) {
         continue;
       }
+      if dirty == DirtyPhase::Paint {
+        needs_paint.push(id);
+        continue;
+      }
 
-      if let Some(info) = self.store.get_mut(id) {
+      if dirty == DirtyPhase::LayoutSubtree {
+        for w in id.0.descendants(&self.arena).map(WidgetId) {
+          if let Some(info) = self.store.get_mut(&w) {
+            info.size.take();
+          }
+        }
+      } else if let Some(info) = self.store.get_mut(&id) {
         info.size.take();
       }
 
-      let mut relayout_root = *id;
+      let mut relayout_root = id;
       // All ancestors of this render widget should relayout until the one which only
       // sized by parent.
       for p in id.0.ancestors(&self.arena).skip(1).map(WidgetId) {
@@ -179,10 +223,9 @@ impl WidgetTree {
       needs_layout.push(relayout_root);
     }
 
-    (!needs_layout.is_empty()).then(|| {
-      needs_layout.sort_by_cached_key(|w| Reverse(w.ancestors(self).count()));
-      needs_layout
-    })
+    needs_layout.sort_by_cached_key(|w| Reverse(w.ancestors(self).count()));
+
+    Some((needs_layout, needs_paint))
   }
 
   pub fn detach(&mut self, id: WidgetId) {
@@ -238,12 +281,22 @@ impl WidgetTree {
 }
 
 impl DirtyMarker {
-  // todo: split layout and paint dirty.
+  /// Mark the widget as dirty and return true if the widget was not already
+  /// marked as dirty in this phase previously.
+  pub(crate) fn mark(&self, id: WidgetId, scope: DirtyPhase) -> bool {
+    let mut map = self.0.borrow_mut();
+    if let Some(s) = map.get_mut(&id) {
+      if *s == DirtyPhase::Paint && scope == DirtyPhase::Layout {
+        *s = scope;
+        return true;
+      }
+      false
+    } else {
+      map.insert(id, scope).is_none()
+    }
+  }
 
-  /// Mark the widget as dirty, return true if it is not already dirty.
-  pub(crate) fn mark(&self, id: WidgetId) -> bool { self.0.borrow_mut().insert(id) }
-
-  pub(crate) fn is_dirty(&self, id: WidgetId) -> bool { self.0.borrow().contains(&id) }
+  pub(crate) fn is_dirty(&self, id: WidgetId) -> bool { self.0.borrow().contains_key(&id) }
 }
 
 #[simple_declare]
@@ -259,12 +312,12 @@ impl Render for Root {
 
     clamp.max
   }
-
-  fn paint(&self, _: &mut PaintingCtx) {}
 }
 
 #[cfg(test)]
 mod tests {
+  use ribir_dev_helper::widget_layout_test;
+
   use super::*;
   #[cfg(target_arch = "wasm32")]
   use crate::test_helper::wasm_bindgen_test;
@@ -392,14 +445,16 @@ mod tests {
     assert_eq!(tree.count(tree.content_root()), 11);
 
     let root = tree.root();
-    tree.dirty_marker().mark(root);
+    tree.dirty_marker().mark(root, DirtyPhase::Layout);
     let new_root = empty_node(&mut tree.arena);
     root.insert_after(new_root, tree);
-    tree.dirty_marker().mark(new_root);
+    tree
+      .dirty_marker()
+      .mark(new_root, DirtyPhase::Layout);
     tree.detach(root);
     tree.remove_subtree(root);
 
-    assert_eq!(tree.layout_list(), Some(vec![new_root]));
+    assert_eq!(tree.layout_list(), Some((vec![new_root], vec![])));
   }
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
@@ -470,4 +525,104 @@ mod tests {
     let len_1_widget = wnd.painter.borrow_mut().finish().len();
     assert_eq!(len_1_widget, len_100_widget);
   }
+
+  #[test]
+  fn paint_phase_dirty() {
+    reset_test_env!();
+
+    #[derive(Default)]
+    struct DirtyPaintOnly {
+      paint_cnt: std::cell::Cell<usize>,
+    }
+
+    impl Render for DirtyPaintOnly {
+      fn perform_layout(&self, clamp: BoxClamp, _: &mut LayoutCtx) -> Size { clamp.max }
+
+      fn paint(&self, _: &mut PaintingCtx) { self.paint_cnt.set(self.paint_cnt.get() + 1); }
+
+      fn dirty_phase(&self) -> DirtyPhase { DirtyPhase::Paint }
+    }
+
+    let paint_cnt = Stateful::new(DirtyPaintOnly::default());
+    let c_paint_cnt = paint_cnt.clone_writer();
+
+    let (layout_cnt, w_layout_cnt) = split_value(0);
+
+    let mut wnd = TestWindow::new(fat_obj! {
+      on_performed_layout: move |_| *$w_layout_cnt.write() += 1,
+      @ { paint_cnt.clone_writer() }
+    });
+
+    wnd.draw_frame();
+
+    assert_eq!(*layout_cnt.read(), 1);
+    assert_eq!(c_paint_cnt.read().paint_cnt.get(), 1);
+
+    {
+      let _ = &mut *c_paint_cnt.write();
+    }
+
+    wnd.draw_frame();
+
+    assert_eq!(*layout_cnt.read(), 1);
+    assert_eq!(c_paint_cnt.read().paint_cnt.get(), 2);
+  }
+
+  #[derive(Declare, SingleChild)]
+  pub struct FixedSizeBox {
+    /// The specified size of the box.
+    pub size: Size,
+  }
+
+  impl Render for FixedSizeBox {
+    #[inline]
+    fn perform_layout(&self, _: BoxClamp, ctx: &mut LayoutCtx) -> Size {
+      ctx.perform_single_child_layout(BoxClamp { min: self.size, max: self.size });
+      self.size
+    }
+
+    #[inline]
+    fn only_sized_by_parent(&self) -> bool { true }
+  }
+
+  fn visual_overflow() -> GenWidget {
+    fn_widget! {
+      @MockMulti {
+        @FixedSizeBox {
+          size: Size::new(150., 50.),
+          background: Color::GRAY,
+          @MockStack {
+            @ FixedSizeBox {
+              size: Size::new(100., 100.),
+              background: Color::GRAY,
+              anchor: Anchor::left_top(-30., 0.),
+            }
+            @ FixedSizeBox {
+              size: Size::new(100., 100.),
+              background: Color::GRAY,
+              anchor: Anchor::top(-20.),
+            }
+          }
+        }
+        @FixedSizeBox {
+          size: Size::new(150., 50.),
+          background: Color::GRAY,
+          clip_boundary: true,
+          @ FixedSizeBox {
+            size: Size::new(100., 100.),
+            background: Color::GRAY,
+            anchor: Anchor::left_top(-30., 20.),
+          }
+        }
+      }
+    }
+    .into()
+  }
+  widget_layout_test!(
+    visual_overflow,
+    WidgetTester::new(visual_overflow()).with_wnd_size(Size::new(500., 500.)),
+    LayoutCase::new(&[0, 0])
+      .with_visual_rect(Rect::new(Point::new(-30., -20.), Size::new(180., 120.))),
+    LayoutCase::new(&[0, 1]).with_visual_rect(Rect::new(Point::new(0., 0.), Size::new(150., 50.)))
+  );
 }

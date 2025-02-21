@@ -1,3 +1,5 @@
+use std::cell::Cell;
+
 use crate::prelude::*;
 /// Enumerate to describe which direction allow widget to scroll.
 #[derive(Debug, Clone, Copy, Default, PartialEq, PartialOrd, Hash)]
@@ -21,7 +23,20 @@ pub struct ScrollableWidget {
   scroll_pos: Point,
   page: Size,
   content_size: Size,
+
+  view_id: Option<TrackId>,
 }
+
+/// The provider of `ScrollableWidget` providers the descendant widgets to use
+/// it.
+///
+/// - Use `Provider::state_of::<ScrollableProvider>` to get the writer of the
+///   `ScrollableWidget`.
+/// - Use `Provider::of::<ScrollableWidget>` to get reference of the
+///   `ScrollableWidget`.
+/// - Use `Provider::write_of` to get the writer's reference of the
+///   `ScrollableWidget`.
+pub type ScrollableProvider = Box<dyn StateWriter<Value = ScrollableWidget>>;
 
 impl Declare for ScrollableWidget {
   type Builder = FatObj<()>;
@@ -33,39 +48,40 @@ impl<'c> ComposeChild<'c> for ScrollableWidget {
   type Child = Widget<'c>;
   fn compose_child(this: impl StateWriter<Value = Self>, child: Self::Child) -> Widget<'c> {
     fn_widget! {
-      let mut view = @UnconstrainedBox {
-        dir: pipe!{
+      let mut view = @Viewport {
+        scroll_dir: distinct_pipe!{
           let this = $this;
-          match this.scrollable {
-            Scrollable::X => UnconstrainedDir::X,
-            Scrollable::Y => UnconstrainedDir::Y,
-            Scrollable::Both => UnconstrainedDir::Both,
-          }
+          this.scrollable
         },
-        clamp_dim: ClampDim::MAX_SIZE,
+        on_wheel: move |e| $this.write().scroll(-e.delta_x, -e.delta_y),
       };
 
       let child = FatObj::new(child);
-      let mut child = @ $child {
-        anchor: pipe!{
+      let child = @ $child {
+        anchor: distinct_pipe!{
           let this = $this;
           let pos = this.get_scroll_pos();
           Anchor::left_top(-pos.x, -pos.y)
+        },
+        on_performed_layout: move |e| {
+          let content_size = e.box_size().unwrap_or_default();
+          if $this.content_size != content_size {
+            $this.write().set_content_size(content_size);
+          }
         }
       };
 
-      watch!($child.layout_size())
-        .distinct_until_changed()
-        .subscribe(move |v| $this.write().set_content_size(v));
-      watch!($view.layout_size())
-        .distinct_until_changed()
-        .subscribe(move |v| $this.write().set_page(v));
+      $this.write().view_id = Some($view.track_id());
 
-      @Clip {
-        @ $view {
-          on_wheel: move |e| $this.write().scroll(-e.delta_x, -e.delta_y),
-          @ { child }
-        }
+      @ $view {
+        on_performed_layout: move |_| {
+          let view_size = $view.size.get();
+          if $this.page != view_size {
+            $this.write().set_page(view_size);
+          }
+        },
+        providers: [Provider::value_of_writer(this.clone_boxed_writer(), None)],
+        @ { child }
       }
     }
     .into_widget()
@@ -73,6 +89,76 @@ impl<'c> ComposeChild<'c> for ScrollableWidget {
 }
 
 impl ScrollableWidget {
+  pub fn map_to_view(&self, p: Point, child: WidgetId, wnd: &Window) -> Option<Point> {
+    let view_id = self.view_id.as_ref()?.get()?;
+    let pos = wnd.map_to_global(p, child);
+    let base = wnd.map_to_global(Point::zero(), view_id);
+    Some(pos - base.to_vector())
+  }
+
+  pub fn map_to_content(&self, p: Point, child: WidgetId, wnd: &Window) -> Option<Point> {
+    let content_id = self
+      .view_id
+      .as_ref()?
+      .get()?
+      .single_child(wnd.tree())?;
+    let pos = wnd.map_to_global(p, child);
+    let base = wnd.map_to_global(Point::zero(), content_id);
+    Some(pos - base.to_vector())
+  }
+
+  /// Keep the content box visible in the scroll view with the given anchor
+  /// relative to the view.
+  ///
+  /// If Anchor.x is None,  it will anchor the widget to the closest edge of the
+  /// view in horizontal direction, when the widget is out of the view.
+  /// If Anchor.y is None, it will anchor the widget to the closest edge of the
+  /// view in vertical direction, when the widget is out of the view.
+  pub fn visible_content_box(&mut self, rect: Rect, anchor: Anchor) {
+    let view_size = self.scroll_view_size();
+
+    let offset_x = anchor
+      .x
+      .or_else(|| {
+        if rect.min_x() > self.scroll_pos.x + view_size.width {
+          Some(HAnchor::Right(0.0.into()))
+        } else if rect.max_x() < self.scroll_pos.x {
+          Some(HAnchor::Left(0.0.into()))
+        } else {
+          None
+        }
+      })
+      .map_or(self.scroll_pos.x, |x| rect.min_x() - x.into_pixel(rect.width(), view_size.width));
+
+    let offset_y = anchor
+      .y
+      .or_else(|| {
+        if rect.min_y() > view_size.height + self.scroll_pos.y {
+          Some(VAnchor::Bottom(0.0.into()))
+        } else if rect.max_y() < self.scroll_pos.y {
+          Some(VAnchor::Top(0.0.into()))
+        } else {
+          None
+        }
+      })
+      .map_or(self.scroll_pos.y, |y| rect.min_y() - y.into_pixel(rect.height(), view_size.height));
+
+    self.jump_to(Point::new(offset_x, offset_y));
+  }
+
+  /// Ensure the given child is visible in the scroll view with the given anchor
+  /// relative to the view.
+  /// If Anchor.x is None,  it will anchor the widget to the closest edge of the
+  /// view in horizontal direction, when the widget is out of the view.
+  /// If Anchor.y is None, it will anchor the widget to the closest edge of the
+  /// view in vertical direction, when the widget is out of the view.
+  pub fn visible_widget(&mut self, child: WidgetId, anchor: Anchor, wnd: &Window) {
+    let Some(pos) = self.map_to_content(Point::zero(), child, wnd) else { return };
+    let Some(size) = wnd.widget_size(child) else { return };
+    let show_box = Rect::new(pos, size);
+    self.visible_content_box(show_box, anchor);
+  }
+
   pub fn scroll(&mut self, x: f32, y: f32) {
     let mut new = self.scroll_pos;
     if self.scrollable != Scrollable::X {
@@ -113,13 +199,13 @@ impl ScrollableWidget {
   pub fn get_scroll_pos(&self) -> Point { self.scroll_pos }
 
   pub fn get_x_scroll_rate(&self) -> f32 {
-    let content = self.content_size.width;
-    if content.is_infinite() || content.is_nan() { 0. } else { self.scroll_pos.x / content }
+    let pos = self.scroll_pos.x;
+    if pos.is_normal() { pos / self.max_scrollable().x } else { 0. }
   }
 
   pub fn get_y_scroll_rate(&self) -> f32 {
-    let content = self.content_size.height;
-    if content.is_infinite() || content.is_nan() { 0. } else { self.scroll_pos.y / content }
+    let pos = self.scroll_pos.y;
+    if pos.is_normal() { pos / self.max_scrollable().y } else { 0. }
   }
 
   fn sync_pos(&mut self) { self.jump_to(self.scroll_pos) }
@@ -132,6 +218,51 @@ impl ScrollableWidget {
   fn set_page(&mut self, page: Size) {
     self.page = page;
     self.sync_pos()
+  }
+}
+
+#[derive(SingleChild, Declare)]
+struct Viewport {
+  scroll_dir: Scrollable,
+  #[declare(skip)]
+  size: Cell<Size>,
+}
+
+impl Render for Viewport {
+  fn perform_layout(&self, clamp: BoxClamp, ctx: &mut LayoutCtx) -> Size {
+    let mut child_clamp = clamp;
+    if self.scroll_dir != Scrollable::X {
+      child_clamp.max.height = f32::INFINITY;
+    }
+    if self.scroll_dir != Scrollable::Y {
+      child_clamp.max.width = f32::INFINITY;
+    }
+
+    let child_size = ctx.assert_perform_single_child_layout(child_clamp);
+    let size = clamp.clamp(child_size);
+    // The viewport needs to accurately record its real size, as widgets like
+    // `padding` may increase the size without the viewport accounting for the
+    // additional space.
+    self.size.set(size);
+
+    size
+  }
+
+  fn paint(&self, ctx: &mut PaintingCtx) {
+    let rect = Rect::from_size(self.size.get());
+    let path = if let Some(radius) = Provider::of::<Radius>(ctx) {
+      Path::rect_round(&rect, &radius)
+    } else {
+      Path::rect(&rect)
+    };
+
+    ctx.painter().clip(path.into());
+  }
+
+  fn visual_box(&self, ctx: &mut VisualCtx) -> Option<Rect> {
+    let clip_rect = Rect::from_size(self.size.get());
+    ctx.clip(clip_rect);
+    Some(clip_rect)
   }
 }
 
@@ -162,7 +293,7 @@ mod tests {
     });
 
     wnd.draw_frame();
-    let pos = wnd.layout_info_by_path(&[0, 0, 0]).unwrap().pos;
+    let pos = wnd.layout_info_by_path(&[0, 0]).unwrap().pos;
     assert_eq!(pos, Point::new(expect_x, expect_y));
   }
 

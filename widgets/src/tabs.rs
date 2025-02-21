@@ -77,7 +77,7 @@ pub struct TabsStyle {
 }
 
 impl CustomStyle for TabsStyle {
-  fn default_style(ctx: &impl ProviderCtx) -> Self {
+  fn default_style(ctx: &impl AsRef<ProviderCtx>) -> Self {
     let palette = Palette::of(ctx);
     TabsStyle {
       extent_with_both: 64.,
@@ -247,6 +247,7 @@ impl ComposeChild<'static> for Tabs {
           (false, false) => 0.
         };
         let mut flex = @Flex {
+          align_items: Align::Stretch,
           direction: pipe!(match $this.pos {
             Position::Top | Position::Bottom => Direction::Horizontal,
             Position::Left | Position::Right => Direction::Vertical,

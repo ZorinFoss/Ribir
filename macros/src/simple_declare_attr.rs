@@ -12,12 +12,18 @@ pub struct Declarer<'a> {
   pub fields: Vec<DeclareField<'a>>,
 }
 
-pub(crate) fn simple_declarer_attr(stt: &mut syn::ItemStruct) -> Result<TokenStream> {
+pub(crate) fn simple_declarer_attr(
+  stt: &mut syn::ItemStruct, stateless: bool,
+) -> Result<TokenStream> {
   if stt.fields.is_empty() {
     return empty_impl(stt);
   }
   let syn::ItemStruct { vis, generics, ident, fields, .. } = stt;
   let declarer = Declarer::new(ident, fields)?;
+
+  if declarer.all_fields_skipped() {
+    return Ok(self_impl(ident, generics, declarer.all_members()));
+  }
 
   let name = &declarer.name;
   let init_pairs = init_pairs(&declarer.fields, ident);
@@ -38,19 +44,34 @@ pub(crate) fn simple_declarer_attr(stt: &mut syn::ItemStruct) -> Result<TokenStr
       }
     }
 
-    impl #g_impl ObjDeclarer for #name #g_ty #g_where {
-      type Target = State<#ident #g_ty>;
-
-      #[inline]
-      fn finish(mut self) -> Self::Target {
-        State::value(#ident {#(#init_pairs),*})
-      }
-    }
-
     impl #g_impl #name #g_ty #g_where {
       #(#set_methods)*
     }
   };
+
+  if stateless {
+    tokens.extend(quote! {
+      impl #g_impl ObjDeclarer for #name #g_ty #g_where {
+        type Target = #ident #g_ty;
+
+        #[track_caller]
+        fn finish(self) -> Self::Target {
+          #ident {#(#init_pairs),*}
+        }
+      }
+    });
+  } else {
+    tokens.extend(quote! {
+      impl #g_impl ObjDeclarer for #name #g_ty #g_where {
+        type Target = State<#ident #g_ty>;
+
+        #[track_caller]
+        fn finish(mut self) -> Self::Target {
+          State::value(#ident {#(#init_pairs),*})
+        }
+      }
+    });
+  }
 
   stt.to_tokens(&mut tokens);
   Ok(tokens)
@@ -78,6 +99,31 @@ fn empty_impl(stt: &syn::ItemStruct) -> Result<TokenStream> {
     }
   };
   Ok(tokens)
+}
+
+fn self_impl<'a>(
+  name: &Ident, generics: &syn::Generics, members: impl Iterator<Item = &'a Ident>,
+) -> TokenStream {
+  let (g_impl, g_ty, g_where) = generics.split_for_impl();
+
+  quote! {
+    impl #g_impl Declare for #name #g_ty #g_where {
+      type Builder = #name #g_ty;
+
+      fn declarer() -> Self::Builder {
+        #name {
+          #(#members: <_>::default()),*
+        }
+      }
+    }
+
+    impl #g_impl ObjDeclarer for #name #g_ty #g_where {
+      type Target = #name #g_ty;
+
+      #[track_caller]
+      fn finish(self) -> Self::Target { self }
+    }
+  }
 }
 
 impl<'a> Declarer<'a> {
@@ -116,6 +162,18 @@ impl<'a> Declarer<'a> {
       .filter(|f| f.is_not_skip())
       .map(|f| (f.member(), &f.field.ty))
       .unzip()
+  }
+
+  pub fn all_members(&self) -> impl Iterator<Item = &Ident> {
+    self.fields.iter().map(|f| f.member())
+  }
+
+  pub fn all_fields_skipped(&self) -> bool {
+    self.fields.iter().all(|f| {
+      f.attr
+        .as_ref()
+        .is_some_and(|attr| attr.skip.is_some())
+    })
   }
 }
 mod kw {

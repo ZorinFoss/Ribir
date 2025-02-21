@@ -4,7 +4,8 @@ use crate::todos::{Task, Todos};
 
 impl Compose for Todos {
   fn compose(this: impl StateWriter<Value = Self>) -> Widget<'static> {
-    fn_widget! {
+    providers! {
+      providers: [Provider::value_of_writer(this.clone_writer(), None)],
       @Column {
         align_items: Align::Center,
         item_gap: 12.,
@@ -55,7 +56,7 @@ fn task_lists(
               let task = this.split_writer(
                 // task will always exist, if the task is removed,
                 // sthe widgets list will be rebuild.
-                move |todos| PartData::from_ref_mut(todos.get_task_mut(id).unwrap()),
+                move |todos| PartMut::new(todos.get_task_mut(id).unwrap()),
               );
               let item = pipe!(*$editing == Some(id))
                 .value_chain(|s| s.distinct_until_changed().box_it())
@@ -108,20 +109,22 @@ fn input(
     if let Some(text) = text {
       $input.write().set_text(&text);
     }
-    @ $input {
-      margin: EdgeInsets::horizontal(24.),
-      h_align: HAlign::Stretch,
-      border: {
-        let color = Palette::of(BuildCtx::get()).surface_variant().into();
-        Border::only_bottom(BorderSide { width: 2., color })
-      },
-      on_key_down: move |e| {
-        if e.key_code() == &PhysicalKey::Code(KeyCode::Enter) {
-          on_submit($input.text().clone());
-          $input.write().set_text("");
-        }
-      },
-      @{ Placeholder::new("What do you want to do ?") }
+    @ Stack {
+      padding: EdgeInsets::horizontal(24.),
+      @Text {
+        h_align: HAlign::Stretch,
+        visible: pipe!($input.text().is_empty()),
+        text: "What do you want to do ?"
+      }
+      @ $input {
+        h_align: HAlign::Stretch,
+        on_key_down: move |e| {
+          if e.key_code() == &PhysicalKey::Code(KeyCode::Enter) {
+            on_submit($input.text().clone());
+            $input.write().set_text("");
+          }
+        },
+      }
     }
   }
   .into_widget()
@@ -130,9 +133,7 @@ fn input(
 fn task_item_widget<S>(task: S, stagger: Stateful<Stagger<Box<dyn Transition>>>) -> Widget<'static>
 where
   S: StateWriter<Value = Task> + 'static,
-  S::OriginWriter: StateWriter<Value = Todos>,
 {
-  let todos = task.origin_writer().clone_writer();
   fn_widget! {
     let id = $task.id();
     let mut item = @ListItem { };
@@ -141,10 +142,10 @@ where
       $item.write().opacity = 0.;
       let transform = item
         .get_transform_widget()
-        .map_writer(|w| PartData::from_ref_mut(&mut w.transform));
+        .map_writer(|w| PartMut::new(&mut w.transform));
       let opacity = item
         .get_opacity_widget()
-        .map_writer(|w| PartData::from_ref_mut(&mut w.opacity));
+        .map_writer(|w| PartMut::new(&mut w.opacity));
       let fly_in = stagger.push_state(
         (transform, opacity),
         (Transform::translation(0., 64.), 0.),
@@ -169,7 +170,7 @@ where
         let icon = FatObj::new(icon);
         @ $icon {
           cursor: CursorIcon::Pointer,
-          on_tap: move |_| $todos.write().remove(id),
+          on_tap: move |e| Provider::write_of::<Todos>(e).unwrap().remove(id)
         }.into_widget()
       }))
     }

@@ -26,11 +26,11 @@ use ribir_core::{impl_compose_child_for_wrap_render, prelude::*, wrap_render::Wr
 /// theme
 ///   .font_files
 ///   .push("the font file path".to_string());
-/// theme.icon_font = FontFace {
+/// theme.icon_font = IconFont(FontFace {
 ///   families: Box::new([FontFamily::Name("Your icon font family name".into())]),
 ///   // The rest of the face configuration depends on your font file
 ///   ..<_>::default()
-/// };
+/// });
 ///
 /// // Using a named SVG as an icon
 /// let _icon = icon! { @ { svgs::DELETE } };
@@ -83,17 +83,18 @@ impl<'c> ComposeChild<'c> for Icon {
 }
 
 struct IconText;
-impl_compose_child_for_wrap_render!(IconText);
+impl_compose_child_for_wrap_render!(IconText, DirtyPhase::Layout);
 
 impl WrapRender for IconText {
   fn perform_layout(&self, clamp: BoxClamp, host: &dyn Render, ctx: &mut LayoutCtx) -> Size {
-    let font_face = Theme::of(&ctx).icon_font.clone();
-    let old = ctx.text_style().clone();
-    let style = ctx.text_style_mut();
+    let font_face = Provider::of::<IconFont>(&ctx).unwrap().0.clone();
+    let mut style = Provider::of::<TextStyle>(ctx).unwrap().clone();
     style.font_face = font_face;
     style.font_size = style.line_height;
+    let mut style = Provider::new(style);
+    style.setup(ctx.as_mut());
     let size = host.perform_layout(clamp, ctx);
-    *ctx.text_style_mut() = old;
+    style.restore(ctx.as_mut());
     size
   }
 }
@@ -105,13 +106,19 @@ struct IconRender {
 
 impl Render for IconRender {
   fn perform_layout(&self, clamp: BoxClamp, ctx: &mut LayoutCtx) -> Size {
-    let icon_size = ctx.text_style().line_height;
+    let icon_size = Provider::of::<TextStyle>(ctx)
+      .unwrap()
+      .line_height;
     let child_size = ctx
       .perform_single_child_layout(BoxClamp::default())
       .unwrap_or_default();
     let scale = icon_size / child_size.width.max(child_size.height);
     self.scale.set(scale);
     clamp.clamp(Size::splat(icon_size))
+  }
+
+  fn visual_box(&self, ctx: &mut VisualCtx) -> Option<Rect> {
+    Some(Rect::from_size(ctx.box_size().unwrap()))
   }
 
   fn paint(&self, ctx: &mut PaintingCtx) {
@@ -173,11 +180,11 @@ mod tests {
       theme
         .font_bytes
         .push(include_bytes!("../../fonts/material-search.ttf").to_vec());
-      theme.icon_font = FontFace {
+      theme.icon_font = IconFont(FontFace {
         families: Box::new([FontFamily::Name("Material Symbols Rounded 48pt".into())]),
         weight: FontWeight::NORMAL,
         ..<_>::default()
-      };
+      });
     })
     .with_comparison(0.002)
   );

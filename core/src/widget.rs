@@ -8,7 +8,6 @@ use std::{cell::RefCell, convert::Infallible};
 
 use ops::box_it::CloneableBoxOp;
 use ribir_algo::Sc;
-use smallvec::SmallVec;
 use widget_id::RenderQueryable;
 
 pub(crate) use crate::widget_tree::*;
@@ -32,6 +31,17 @@ pub trait Render: 'static {
   ///
   /// In implementing this function, You are responsible for calling every
   /// children's perform_layout across the `LayoutCtx`
+  ///
+  /// ## Guidelines for implementing this method
+  ///
+  /// - The clamp should restrict the size to always fall within the specified
+  ///   range.
+  /// - Avoid returning infinity or NaN size, as this could result in a crash.
+  ///   If your size calculation is dependent on the `clamp.max`, you might want
+  ///   to consider using [`LayoutCtx::fixed_max`].
+  /// - Parent has responsibility to call the children's perform_layout, and
+  ///   update the children's position. If the children position is not updated
+  ///   that will set to zero.
   fn perform_layout(&self, clamp: BoxClamp, ctx: &mut LayoutCtx) -> Size;
 
   /// Draw the widget on the paint device using `PaintingCtx::painter` within
@@ -46,7 +56,7 @@ pub trait Render: 'static {
 
   /// Verify if the provided position is within this widget and return whether
   /// its child can be hit if the widget itself is not hit.
-  fn hit_test(&self, ctx: &HitTestCtx, pos: Point) -> HitTest {
+  fn hit_test(&self, ctx: &mut HitTestCtx, pos: Point) -> HitTest {
     let hit = ctx.box_hit_test(pos);
     // If the widget is not solely sized by the parent, indicating it is not a
     // fixed-size container, we permit the child to receive hits even if it
@@ -54,44 +64,36 @@ pub trait Render: 'static {
     HitTest { hit, can_hit_child: hit || !self.only_sized_by_parent() }
   }
 
-  /// Return a transform to map the coordinate from its parent to this widget.
+  /// By default, this function returns a `Layout` phase to indicate that the
+  /// widget should be marked as dirty when modified. When the layout phase is
+  /// marked as dirty, the paint phase will also be affected.
+  fn dirty_phase(&self) -> DirtyPhase { DirtyPhase::Layout }
+
+  /// Return a transform to map the coordinate to parent coordinate.
   fn get_transform(&self) -> Option<Transform> { None }
+
+  /// Computes the visual bounding box of the widget relative to self.
+  /// The method is called by framework after the layout is done.
+  /// Usually if you paint something, you should return the bounding box of the
+  /// paint. Default implementation will return None which means the
+  /// current widget will not be rendered.
+  ///
+  ///
+  /// Parameters:
+  ///
+  /// * `ctx`: The VisualCtx.
+  ///
+  /// Returns:
+  ///
+  /// The visual bounding box of the widget.
+  #[allow(unused_variables)]
+  fn visual_box(&self, ctx: &mut VisualCtx) -> Option<Rect> { None }
 }
 
 /// The common type of all widget can convert to.
 pub struct Widget<'w>(InnerWidget<'w>);
 
-enum InnerWidget<'w> {
-  Node(Node<'w>),
-  Lazy(LazyNode<'w>),
-}
-
-enum Node<'w> {
-  Leaf(Box<dyn FnOnce() -> WidgetId + 'w>),
-  Tree { parent: Box<dyn FnOnce() -> WidgetId + 'w>, children: Vec<Widget<'w>> },
-}
-
-/// This serves as a wrapper for `Box<dyn FnOnce(&BuildCtx) -> Node<'w> +
-/// 'w>`, but does not utilize the `'w` in the return type to prevent the
-/// `LazyWidget` from becoming **invariant**. This approach allows `Widget<'w>`
-/// to remain **covariant** with the lifetime `'w`.
-///
-/// This approach should be acceptable since `LazyWidget` is private and not
-/// accessed externally. Additionally, the lifetime will shorten once we consume
-/// it to obtain the `Widget<'w>`.
-struct LazyNode<'w>(Box<dyn FnOnce() -> Widget<'static> + 'w>);
-
-impl<'w> LazyNode<'w> {
-  fn new(f: impl FnOnce() -> Widget<'w> + 'w) -> Self {
-    let f: Box<dyn FnOnce() -> Widget<'w> + 'w> = Box::new(f);
-    // Safety: the lifetime will shorten once we consume it to obtain the
-    // `Widget<'w>`.
-    let f: Box<dyn FnOnce() -> Widget<'static> + 'w> = unsafe { std::mem::transmute(f) };
-    Self(f)
-  }
-
-  fn consume(self) -> Widget<'w> { (self.0)() }
-}
+pub struct InnerWidget<'w>(Box<dyn FnOnce(&mut BuildCtx) -> WidgetId + 'w>);
 
 /// A boxed function widget that can be called multiple times to regenerate
 /// widget.
@@ -112,6 +114,7 @@ pub struct FnWidget<'w>(Box<dyn FnOnce() -> Widget<'w> + 'w>);
 pub const COMPOSE: usize = 1;
 pub const RENDER: usize = 2;
 pub const FN: usize = 3;
+pub const STATELESS_COMPOSE: usize = 4;
 
 /// Defines a trait for converting any widget into a `Widget` type. Direct
 /// implementation of this trait is not recommended as it is automatically
@@ -140,6 +143,8 @@ impl GenWidget {
 
 impl<'w> FnWidget<'w> {
   pub fn new(f: impl FnOnce() -> Widget<'w> + 'w) -> Self { Self(Box::new(f)) }
+
+  pub fn call(self) -> Widget<'w> { (self.0)() }
 }
 
 impl<'w> IntoWidget<'w, FN> for Widget<'w> {
@@ -152,7 +157,7 @@ impl<'w, const M: usize, T: IntoWidgetStrict<'w, M>> IntoWidget<'w, M> for T {
   fn into_widget(self) -> Widget<'w> { self.into_widget_strict() }
 }
 
-impl<C: Compose + 'static> IntoWidgetStrict<'static, COMPOSE> for C {
+impl<C: Compose + 'static> IntoWidgetStrict<'static, STATELESS_COMPOSE> for C {
   #[inline]
   fn into_widget_strict(self) -> Widget<'static> {
     Compose::compose(State::value(self)).into_widget()
@@ -173,10 +178,7 @@ impl<'w, F> IntoWidgetStrict<'w, FN> for F
 where
   F: FnOnce() -> Widget<'w> + 'w,
 {
-  fn into_widget_strict(self) -> Widget<'w> {
-    let lazy = LazyNode::new(self);
-    Widget(InnerWidget::Lazy(lazy))
-  }
+  fn into_widget_strict(self) -> Widget<'w> { Widget::from_fn(move |ctx| self().call(ctx)) }
 }
 
 impl<'w> IntoWidgetStrict<'w, FN> for FnWidget<'w> {
@@ -193,12 +195,11 @@ impl<'w> Widget<'w> {
   /// Invoke a function when the root node of the widget is built, passing its
   /// ID and build context as parameters.
   pub fn on_build(self, f: impl FnOnce(WidgetId) + 'w) -> Self {
-    let lazy = move || {
-      let node = self.into_node().on_build(f);
-      Widget(InnerWidget::Node(node))
-    };
-
-    Widget(InnerWidget::Lazy(LazyNode::new(lazy)))
+    Widget::from_fn(move |ctx| {
+      let id = self.call(ctx);
+      f(id);
+      id
+    })
   }
 
   /// Subscribe to the modified `upstream` to mark the widget as dirty when the
@@ -207,7 +208,9 @@ impl<'w> Widget<'w> {
   /// # Panic
   /// This method only works within a build process; otherwise, it will
   /// result in a panic.
-  pub fn dirty_on(self, upstream: CloneableBoxOp<'static, ModifyScope, Infallible>) -> Self {
+  pub fn dirty_on(
+    self, upstream: CloneableBoxOp<'static, ModifyScope, Infallible>, dirty: DirtyPhase,
+  ) -> Self {
     let track = TrackWidgetId::default();
     let id = track.track_id();
 
@@ -217,7 +220,7 @@ impl<'w> Widget<'w> {
       .filter(|b| b.contains(ModifyScope::FRAMEWORK))
       .subscribe(move |_| {
         if let Some(id) = id.get() {
-          marker.mark(id);
+          marker.mark(id, dirty);
         }
       })
       .unsubscribe_when_dropped();
@@ -229,7 +232,7 @@ impl<'w> Widget<'w> {
   }
 
   pub(crate) fn from_render(r: Box<dyn RenderQueryable>) -> Widget<'static> {
-    Widget(InnerWidget::Node(Node::Leaf(Box::new(|| BuildCtx::get_mut().alloc(r)))))
+    Widget::from_fn(|_| BuildCtx::get_mut().tree_mut().alloc_node(r))
   }
 
   /// Attach anonymous data to a widget and user can't query it.
@@ -254,46 +257,6 @@ impl<'w> Widget<'w> {
     self.attach_data(data)
   }
 
-  pub(crate) fn build(self) -> WidgetId {
-    let mut subtrees = vec![];
-    let root = self.into_node().build(&mut subtrees);
-    let ctx = BuildCtx::get_mut();
-    while let Some((p, child)) = subtrees.pop() {
-      if ctx.providers.last() == Some(&p) && subtrees.last().map(|(p, _)| p) != Some(&p) {
-        ctx.providers.pop();
-      } else if ctx.providers.last() != Some(&p) && p.queryable(ctx.tree()) {
-        ctx.providers.push(p);
-      }
-      let c = child.into_node().build(&mut subtrees);
-      p.append(c, ctx.tree_mut());
-    }
-    root
-  }
-
-  pub(crate) fn directly_compose_children(self, children: Vec<Widget<'w>>) -> Widget<'w> {
-    let mut list: SmallVec<[_; 1]> = SmallVec::default();
-    let mut node = Some(self);
-    while let Some(n) = node.take() {
-      match n.into_node() {
-        Node::Leaf(r) => list.push(r),
-        Node::Tree { parent, mut children } => {
-          list.push(parent);
-          if let Some(p) = children.pop() {
-            node = Some(p)
-          }
-          assert!(children.is_empty(), "As a parent widget, it should have exactly one child.")
-        }
-      }
-    }
-
-    let mut node = Node::Tree { parent: list.pop().unwrap(), children };
-    while let Some(n) = list.pop() {
-      node = Node::Tree { parent: n, children: vec![node.into_widget()] };
-    }
-
-    node.into_widget()
-  }
-
   /// Convert an ID back to a widget.
   ///
   /// # Note
@@ -302,53 +265,17 @@ impl<'w> Widget<'w> {
   /// cases, you should avoid using this method to create a widget unless you
   /// are certain that the entire logic is suitable for creating this widget
   /// from an ID.
-  pub(crate) fn from_id(id: WidgetId) -> Widget<'static> {
-    let node = Node::Leaf(Box::new(move || id));
-    Widget(InnerWidget::Node(node))
+  pub(crate) fn from_id(id: WidgetId) -> Widget<'static> { Widget::from_fn(move |_| id) }
+
+  pub(crate) fn new(parent: Widget<'w>, children: Vec<Widget<'w>>) -> Widget<'w> {
+    Widget::from_fn(move |ctx| ctx.build_parent(parent, children))
   }
 
-  fn into_node(self) -> Node<'w> {
-    let mut w = self;
-    loop {
-      match w.0 {
-        InnerWidget::Node(node) => break node,
-        InnerWidget::Lazy(l) => w = l.consume(),
-      }
-    }
-  }
-}
-
-impl<'w> Node<'w> {
-  fn build(self, subtrees: &mut Vec<(WidgetId, Widget<'w>)>) -> WidgetId {
-    match self {
-      Node::Leaf(r) => r(),
-      Node::Tree { parent, children } => {
-        let p = parent();
-        for c in children.into_iter().rev() {
-          subtrees.push((p, c))
-        }
-        p
-      }
-    }
+  pub(crate) fn from_fn(f: impl FnOnce(&mut BuildCtx) -> WidgetId + 'w) -> Widget<'w> {
+    Widget(InnerWidget(Box::new(f)))
   }
 
-  fn into_widget(self) -> Widget<'w> { Widget(InnerWidget::Node(self)) }
-
-  fn on_build(self, f: impl FnOnce(WidgetId) + 'w) -> Self {
-    let on_build_node = |node: Box<dyn FnOnce() -> WidgetId + 'w>| {
-      let new_node = move || {
-        let id = node();
-        f(id);
-        id
-      };
-      Box::new(new_node)
-    };
-
-    match self {
-      Node::Leaf(n) => Node::Leaf(on_build_node(n)),
-      Node::Tree { parent, children } => Node::Tree { parent: on_build_node(parent), children },
-    }
-  }
+  pub(crate) fn call(self, ctx: &mut BuildCtx) -> WidgetId { (self.0.0)(ctx) }
 }
 
 impl<F: FnMut() -> Widget<'static> + 'static> From<F> for GenWidget {

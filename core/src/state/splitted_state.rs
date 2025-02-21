@@ -16,11 +16,10 @@ impl<V: ?Sized, O, W> StateReader for SplittedWriter<O, W>
 where
   Self: 'static,
   O: StateWriter,
-  W: Fn(&mut O::Value) -> PartData<V> + Clone,
+  W: Fn(&mut O::Value) -> PartMut<V> + Clone,
 {
   type Value = V;
-  type OriginReader = O;
-  type Reader = MapWriterAsReader<O::Reader, W>;
+  type Reader = MapReader<O::Reader, WriterMapReaderFn<W>>;
 
   #[track_caller]
   fn read(&self) -> ReadRef<Self::Value> {
@@ -28,19 +27,16 @@ where
   }
 
   #[inline]
-  fn clone_reader(&self) -> Self::Reader {
-    MapWriterAsReader { origin: self.origin.clone_reader(), part_map: self.splitter.clone() }
+  fn clone_boxed_reader(&self) -> Box<dyn StateReader<Value = Self::Value>> {
+    Box::new(self.clone_reader())
   }
 
   #[inline]
-  fn origin_reader(&self) -> &Self::OriginReader { &self.origin }
-
-  #[inline]
-  fn try_into_value(self) -> Result<Self::Value, Self>
-  where
-    Self::Value: Sized,
-  {
-    Err(self)
+  fn clone_reader(&self) -> Self::Reader {
+    MapReader {
+      origin: self.origin.clone_reader(),
+      part_map: WriterMapReaderFn(self.splitter.clone()),
+    }
   }
 }
 
@@ -48,10 +44,21 @@ impl<V: ?Sized, O, W> StateWatcher for SplittedWriter<O, W>
 where
   Self: 'static,
   O: StateWriter,
-  W: Fn(&mut O::Value) -> PartData<V> + Clone,
+  W: Fn(&mut O::Value) -> PartMut<V> + Clone,
 {
+  type Watcher = Watcher<Self::Reader>;
+
+  #[inline]
+  fn clone_boxed_watcher(&self) -> Box<dyn StateWatcher<Value = Self::Value>> {
+    Box::new(self.clone_watcher())
+  }
   fn raw_modifies(&self) -> CloneableBoxOp<'static, ModifyScope, std::convert::Infallible> {
     self.info.notifier.raw_modifies().box_it()
+  }
+
+  #[inline]
+  fn clone_watcher(&self) -> Watcher<Self::Reader> {
+    Watcher::new(self.clone_reader(), self.raw_modifies())
   }
 }
 
@@ -59,11 +66,8 @@ impl<V: ?Sized, O, W> StateWriter for SplittedWriter<O, W>
 where
   Self: 'static,
   O: StateWriter,
-  W: Fn(&mut O::Value) -> PartData<V> + Clone,
+  W: Fn(&mut O::Value) -> PartMut<V> + Clone,
 {
-  type Writer = SplittedWriter<O::Writer, W>;
-  type OriginWriter = O;
-
   fn into_reader(self) -> Result<Self::Reader, Self> {
     if self.info.writer_count.get() == 1 { Ok(self.clone_reader()) } else { Err(self) }
   }
@@ -77,7 +81,12 @@ where
   #[inline]
   fn shallow(&self) -> WriteRef<Self::Value> { self.split_ref(self.origin.shallow()) }
 
-  fn clone_writer(&self) -> Self::Writer {
+  #[inline]
+  fn clone_boxed_writer(&self) -> Box<dyn StateWriter<Value = Self::Value>> {
+    Box::new(self.clone_writer())
+  }
+
+  fn clone_writer(&self) -> Self {
     self.info.inc_writer();
     SplittedWriter {
       origin: self.origin.clone_writer(),
@@ -85,15 +94,12 @@ where
       info: self.info.clone(),
     }
   }
-
-  #[inline]
-  fn origin_writer(&self) -> &Self::OriginWriter { &self.origin }
 }
 
 impl<V: ?Sized, O, W> SplittedWriter<O, W>
 where
   O: StateWriter,
-  W: Fn(&mut O::Value) -> PartData<V> + Clone,
+  W: Fn(&mut O::Value) -> PartMut<V> + Clone,
 {
   pub(super) fn new(origin: O, mut_map: W) -> Self {
     Self { origin, splitter: mut_map, info: Sc::new(WriterInfo::new()) }
@@ -108,8 +114,10 @@ where
     assert!(!orig.modified);
     orig.modify_scope.remove(ModifyScope::FRAMEWORK);
     orig.modified = true;
-    let value =
-      ValueMutRef { inner: (self.splitter)(&mut orig.value), borrow: orig.value.borrow.clone() };
+    let value = ValueMutRef {
+      inner: (self.splitter)(&mut orig.value).inner,
+      borrow: orig.value.borrow.clone(),
+    };
 
     WriteRef { value, modified: false, modify_scope, info: &self.info }
   }
@@ -120,12 +128,4 @@ where
   Self: StateWriter<Value: Render + Sized> + 'w,
 {
   fn into_widget_strict(self) -> Widget<'w> { WriterRender(self).into_widget() }
-}
-
-impl<S, F> IntoWidgetStrict<'static, COMPOSE> for SplittedWriter<S, F>
-where
-  Self: StateWriter + 'static,
-  <Self as StateReader>::Value: Compose,
-{
-  fn into_widget_strict(self) -> Widget<'static> { Compose::compose(self) }
 }

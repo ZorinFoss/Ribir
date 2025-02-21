@@ -26,8 +26,6 @@ mod foreground;
 mod padding;
 pub use foreground::*;
 pub use padding::*;
-mod box_decoration;
-pub use box_decoration::*;
 mod scrollable;
 pub use scrollable::*;
 mod transform_widget;
@@ -55,6 +53,8 @@ pub use svg::*;
 
 pub mod clip;
 pub use clip::*;
+pub mod clip_boundary;
+pub use clip_boundary::*;
 pub mod focus_node;
 pub use focus_node::*;
 pub mod focus_scope;
@@ -65,8 +65,6 @@ mod mix_builtin;
 pub use mix_builtin::*;
 pub mod container;
 pub use container::*;
-mod provider;
-pub use provider::*;
 mod class;
 pub use class::*;
 mod constrained_box;
@@ -82,6 +80,14 @@ mod text;
 pub use text::*;
 mod tooltips;
 pub use tooltips::*;
+mod providers;
+pub use providers::*;
+mod border;
+pub use border::*;
+mod radius;
+pub use radius::*;
+mod background;
+pub use background::*;
 
 use crate::prelude::*;
 
@@ -120,7 +126,9 @@ pub struct FatObj<T> {
   padding: Option<State<Padding>>,
   fitted_box: Option<State<FittedBox>>,
   constrained_box: Option<State<ConstrainedBox>>,
-  box_decoration: Option<State<BoxDecoration>>,
+  radius: Option<State<RadiusWidget>>,
+  border: Option<State<BorderWidget>>,
+  background: Option<State<Background>>,
   foreground: Option<State<Foreground>>,
   scrollable: Option<State<ScrollableWidget>>,
   layout_box: Option<State<LayoutBox>>,
@@ -138,8 +146,10 @@ pub struct FatObj<T> {
   painting_style: Option<State<PaintingStyleWidget>>,
   text_style: Option<State<TextStyleWidget>>,
   keep_alive: Option<State<KeepAlive>>,
-  tooltips: Option<State<Tooltips>>,
   keep_alive_unsubscribe_handle: Option<Box<dyn Any>>,
+  tooltips: Option<State<Tooltips>>,
+  clip_boundary: Option<State<ClipBoundary>>,
+  providers: Option<SmallVec<[Provider; 1]>>,
 }
 
 /// Create a function widget that uses an empty `FatObj` as the host object.
@@ -167,7 +177,9 @@ impl<T> FatObj<T> {
       mix_builtin: self.mix_builtin,
       request_focus: self.request_focus,
       fitted_box: self.fitted_box,
-      box_decoration: self.box_decoration,
+      border: self.border,
+      radius: self.radius,
+      background: self.background,
       foreground: self.foreground,
       padding: self.padding,
       layout_box: self.layout_box,
@@ -185,8 +197,10 @@ impl<T> FatObj<T> {
       visibility: self.visibility,
       opacity: self.opacity,
       tooltips: self.tooltips,
+      clip_boundary: self.clip_boundary,
       keep_alive: self.keep_alive,
       keep_alive_unsubscribe_handle: self.keep_alive_unsubscribe_handle,
+      providers: self.providers,
     }
   }
 
@@ -196,7 +210,9 @@ impl<T> FatObj<T> {
       && self.mix_builtin.is_none()
       && self.request_focus.is_none()
       && self.fitted_box.is_none()
-      && self.box_decoration.is_none()
+      && self.border.is_none()
+      && self.radius.is_none()
+      && self.background.is_none()
       && self.foreground.is_none()
       && self.padding.is_none()
       && self.layout_box.is_none()
@@ -216,6 +232,7 @@ impl<T> FatObj<T> {
       && self.opacity.is_none()
       && self.keep_alive.is_none()
       && self.tooltips.is_none()
+      && self.clip_boundary.is_none()
   }
 
   /// Return the host object of the FatObj.
@@ -295,11 +312,21 @@ impl<T> FatObj<T> {
       .get_or_insert_with(|| State::value(<_>::default()))
   }
 
-  /// Returns the `State<BoxDecoration>` widget from the FatObj. If it doesn't
-  /// exist, a new one will be created.
-  pub fn get_box_decoration_widget(&mut self) -> &State<BoxDecoration> {
+  pub fn get_border_widget(&mut self) -> &State<BorderWidget> {
     self
-      .box_decoration
+      .border
+      .get_or_insert_with(|| State::value(<_>::default()))
+  }
+
+  pub fn get_radius_widget(&mut self) -> &State<RadiusWidget> {
+    self
+      .radius
+      .get_or_insert_with(|| State::value(<_>::default()))
+  }
+
+  pub fn get_background_widget(&mut self) -> &State<Background> {
+    self
+      .background
       .get_or_insert_with(|| State::value(<_>::default()))
   }
 
@@ -409,7 +436,11 @@ impl<T> FatObj<T> {
   /// doesn't exist, a new one will be created.
   pub fn get_text_style_widget(&mut self) -> &State<TextStyleWidget> {
     self.text_style.get_or_insert_with(|| {
-      State::value(TextStyleWidget { text_style: BuildCtx::get().text_style().clone() })
+      State::value(TextStyleWidget {
+        text_style: Provider::of::<TextStyle>(BuildCtx::get())
+          .unwrap()
+          .clone(),
+      })
     })
   }
 
@@ -442,6 +473,14 @@ impl<T> FatObj<T> {
   pub fn get_tooltips_widget(&mut self) -> &State<Tooltips> {
     self
       .tooltips
+      .get_or_insert_with(|| State::value(<_>::default()))
+  }
+
+  /// Returns the `State<ClipBoundary>` widget from the FatObj. If it doesn't
+  /// exist, a new one is created.
+  pub fn get_clip_boundary_widget(&mut self) -> &State<ClipBoundary> {
+    self
+      .clip_boundary
       .get_or_insert_with(|| State::value(<_>::default()))
   }
 }
@@ -709,6 +748,20 @@ impl<T> FatObj<T> {
     on_mixin!(self, on_focus_out, f)
   }
 
+  /// Attaches a handler to the specific custom event that is bubbled from the
+  /// descendants.
+  pub fn on_custom_concrete_event<E: 'static>(
+    mut self, f: impl FnMut(&mut CustomEvent<E>) + 'static,
+  ) -> Self {
+    on_mixin!(self, on_custom_concrete_event, f)
+  }
+
+  /// Attaches a handler to raw custom event that is bubbled from the
+  /// descendants.
+  pub fn on_custom_event(mut self, f: impl FnMut(&mut RawCustomEvent) + 'static) -> Self {
+    on_mixin!(self, on_custom_event, f)
+  }
+
   /// Attaches a handler to the widget that is triggered during the capture
   /// phase of a focus out event. This is similar to `on_focus_out`, but it's
   /// triggered earlier in the event flow. For more information on event
@@ -766,7 +819,7 @@ impl<T> FatObj<T> {
     self.declare_builtin_init(v, Self::get_fitted_box_widget, |m, v| m.box_fit = v)
   }
 
-  /// Initializes the painting style of this widget.
+  /// Provide a painting style to this widget.
   pub fn painting_style<const M: usize>(self, v: impl DeclareInto<PaintingStyle, M>) -> Self {
     self.declare_builtin_init(v, Self::get_painting_style_widget, |m, v| m.painting_style = v)
   }
@@ -802,8 +855,8 @@ impl<T> FatObj<T> {
   }
 
   /// Initializes the background of the widget.
-  pub fn background<const M: usize>(self, v: impl DeclareInto<Option<Brush>, M>) -> Self {
-    self.declare_builtin_init(v, Self::get_box_decoration_widget, |m, v| m.background = v)
+  pub fn background<const M: usize>(self, v: impl DeclareInto<Brush, M>) -> Self {
+    self.declare_builtin_init(v, Self::get_background_widget, |m, v| m.background = v)
   }
 
   /// Initializes the foreground of the widget.
@@ -812,13 +865,13 @@ impl<T> FatObj<T> {
   }
 
   /// Initializes the border of the widget.
-  pub fn border<const M: usize>(self, v: impl DeclareInto<Option<Border>, M>) -> Self {
-    self.declare_builtin_init(v, Self::get_box_decoration_widget, |m, v| m.border = v)
+  pub fn border<const M: usize>(self, v: impl DeclareInto<Border, M>) -> Self {
+    self.declare_builtin_init(v, Self::get_border_widget, |m, v| m.border = v)
   }
 
   /// Initializes the border radius of the widget.
-  pub fn border_radius<const M: usize>(self, v: impl DeclareInto<Option<Radius>, M>) -> Self {
-    self.declare_builtin_init(v, Self::get_box_decoration_widget, |m, v| m.border_radius = v)
+  pub fn radius<const M: usize>(self, v: impl DeclareInto<Radius, M>) -> Self {
+    self.declare_builtin_init(v, Self::get_radius_widget, |m, v| m.radius = v)
   }
 
   /// Initializes the extra space within the widget.
@@ -891,6 +944,11 @@ impl<T> FatObj<T> {
     self.declare_builtin_init(v, Self::get_tooltips_widget, |m, v| m.tooltips = v)
   }
 
+  /// Initializes the clip_boundary of the widget.
+  pub fn clip_boundary<const M: usize>(self, v: impl DeclareInto<bool, M>) -> Self {
+    self.declare_builtin_init(v, Self::get_clip_boundary_widget, |m, v| m.clip_boundary = v)
+  }
+
   /// Initializes the `keep_alive` value of the `KeepAlive` widget.
   pub fn keep_alive<const M: usize>(mut self, v: impl DeclareInto<bool, M>) -> Self {
     let (v, o) = v.declare_into().unzip();
@@ -919,6 +977,16 @@ impl<T> FatObj<T> {
     self
   }
 
+  /// Initializes the providers of the widget.
+  pub fn providers(mut self, providers: impl Into<SmallVec<[Provider; 1]>>) -> Self {
+    if let Some(vec) = self.providers.as_mut() {
+      vec.extend(providers.into());
+    } else {
+      self.providers = Some(providers.into());
+    }
+    self
+  }
+
   fn declare_builtin_init<V: 'static, B: 'static, const M: usize>(
     mut self, init: impl DeclareInto<V, M>, get_builtin: impl FnOnce(&mut Self) -> &State<B>,
     set_value: fn(&mut B, V),
@@ -936,6 +1004,15 @@ impl<T> FatObj<T> {
   }
 }
 
+impl<T> FatObj<T> {
+  /// Take the scrollable widget from this widget, and return it if it exists.
+  pub fn take_scrollable_widget(&mut self) -> Option<State<ScrollableWidget>> {
+    self.scrollable.take()
+  }
+
+  /// Returns `true` if the widget has a class.
+  pub fn has_class(&self) -> bool { self.class.is_some() }
+}
 pub trait FatDeclarerExtend: Sized {
   type Target;
   fn finish(this: FatObj<Self>) -> FatObj<Self::Target>;
@@ -960,7 +1037,7 @@ where
 }
 
 impl<'a> FatObj<Widget<'a>> {
-  fn compose(self) -> Widget<'a> {
+  fn compose(mut self) -> Widget<'a> {
     macro_rules! compose_builtin_widgets {
       ($host: ident + [$($field: ident),*]) => {
         $(
@@ -970,7 +1047,24 @@ impl<'a> FatObj<Widget<'a>> {
         )*
       };
     }
+    macro_rules! consume_providers_widget {
+      ($host: ident, + [$($field: ident: $w_ty: ty),*]) => {
+        $(
+          if let Some($field) = self.$field {
+            self
+            .providers
+            .get_or_insert_default()
+            .push(<$w_ty>::into_provider($field));
+          }
+        )*
+      };
+    }
     let mut host = self.host;
+    consume_providers_widget!(host, + [
+      painting_style: PaintingStyleWidget,
+      text_style: TextStyleWidget
+    ]);
+
     compose_builtin_widgets!(
       host
         + [
@@ -978,11 +1072,21 @@ impl<'a> FatObj<Widget<'a>> {
           padding,
           fitted_box,
           foreground,
-          box_decoration,
-          painting_style,
-          text_style,
+          border,
+          background,
+          clip_boundary,
+          radius,
           scrollable,
-          layout_box,
+          layout_box
+        ]
+    );
+    if let Some(providers) = self.providers {
+      host = Providers::new(providers).with_child(host);
+    }
+
+    compose_builtin_widgets!(
+      host
+        + [
           class,
           constrained_box,
           tooltips,
@@ -1089,6 +1193,7 @@ impl<T: SingleChild> SingleChild for DeclarerWithSubscription<T> {
 }
 
 impl<T: MultiChild> MultiChild for DeclarerWithSubscription<T> {
+  type Target<'c> = MultiPair<'c>;
   fn with_child<'c, const N: usize, const M: usize>(
     self, child: impl IntoChildMulti<'c, N, M>,
   ) -> MultiPair<'c> {

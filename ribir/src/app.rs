@@ -100,6 +100,13 @@ impl App {
               loop_handle.exit();
             }
           }
+          WindowEvent::Occluded(false) => {
+            // this is triggered before the app re-enters view
+            // for example, in something like i3 window manager,
+            // when you switch back to the workspace that the app is in
+            // in such cases, we need to re-enter the view otherwise the window stays empty
+            wnd.draw_frame(true);
+          }
           WindowEvent::RedrawRequested => {
             AppCtx::frame_ticks().clone().next(Instant::now());
 
@@ -108,7 +115,7 @@ impl App {
               if wnd.is_visible() != Some(false) {
                 // if this frame is really draw, request another redraw. To make sure the draw
                 // always end with a empty draw and emit an extra tick cycle message.
-                if wnd.draw_frame() {
+                if wnd.draw_frame(false) {
                   request_redraw(&wnd);
                 }
               }

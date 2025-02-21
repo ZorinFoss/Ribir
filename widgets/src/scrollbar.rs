@@ -1,6 +1,6 @@
 use ribir_core::prelude::*;
 
-use crate::layout::Stack;
+use crate::layout::{Stack, StackDeclareExtend, StackFit};
 
 /// This widget wraps its child in a `ScrollableWidget` and adds two scrollbar
 /// for interactivity and visual scroll position indication.
@@ -23,10 +23,7 @@ use crate::layout::Stack;
 /// when implementing the class name, you can utilize
 /// `Provider::of::<ScrollableWidget>` to retrieve the scroll status and
 /// determine the scrollbar's appearance.
-
-#[derive(Declare)]
 pub struct Scrollbar {
-  #[declare(default=Stateful::new(ScrollableWidget::default()))]
   scroll: Stateful<ScrollableWidget>,
 }
 
@@ -43,6 +40,14 @@ class_names! {
   SCROLL_CLIENT_AREA
 }
 
+/// Macro used to generate a function widget using `Scrollbar` as the root
+/// widget.
+#[macro_export]
+macro_rules! scrollbar {
+  ($($t: tt)*) => { fn_widget! { @Scrollbar { $($t)* } } };
+}
+pub use scrollbar;
+
 impl Scrollbar {
   pub fn new(scrollable: Scrollable) -> Self {
     let mut inner = ScrollableWidget::default();
@@ -55,88 +60,131 @@ impl Scrollbar {
   pub fn inner_scrollable_widget(&self) -> &Stateful<ScrollableWidget> { &self.scroll }
 }
 
+pub struct ScrollbarDeclarer;
+
+impl Declare for Scrollbar {
+  type Builder = FatObj<ScrollbarDeclarer>;
+
+  fn declarer() -> Self::Builder { FatObj::new(ScrollbarDeclarer) }
+}
+
+impl FatDeclarerExtend for ScrollbarDeclarer {
+  type Target = Scrollbar;
+  fn finish(mut this: FatObj<Self>) -> FatObj<Self::Target> {
+    let scroll = this.take_scrollable_widget();
+    let scroll = if let Some(scroll) = scroll {
+      scroll.into_stateful()
+    } else {
+      Stateful::new(ScrollableWidget::default())
+    };
+    this.map(|_| Scrollbar { scroll })
+  }
+}
+
 impl<'c> ComposeChild<'c> for Scrollbar {
   type Child = Widget<'c>;
   fn compose_child(this: impl StateWriter<Value = Self>, child: Self::Child) -> Widget<'c> {
     let scroll = this.read().scroll.clone_writer();
-    let w = fn_widget! {
-      let h_scrollbar = distinct_pipe!($scroll.is_x_scrollable())
-        .map(move |need_bar| need_bar.then(||{
-          let mut h_track = @Stack {
-            class: H_SCROLL_TRACK,
-            clamp: BoxClamp::EXPAND_X,
-            on_wheel: move |e| $scroll.write().scroll(-e.delta_x, -e.delta_y),
-          };
-
-          @ $h_track {
-            on_tap: move |e| if e.is_primary {
-              let rate = e.position().x / $h_track.layout_width();
-              let mut scroll = Provider::write_of::<ScrollableWidget>(e).unwrap();
-              let x = rate * scroll.max_scrollable().x;
-              let scroll_pos = Point::new(x, scroll.get_scroll_pos().y);
-              scroll.jump_to(scroll_pos);
-            },
-            @Container {
-              class: H_SCROLL_THUMB,
-              size: distinct_pipe!{
-                let width = h_thumb_rate(&$scroll) * $h_track.layout_width();
-                Size::new(width, 0.)
-              },
-              anchor: distinct_pipe!{
-                let pos = $scroll.get_x_scroll_rate() * $h_track.layout_width();
-                Anchor::left(pos)
-              },
-            }
-          }
-        }));
-
-      let v_scrollbar = distinct_pipe!($scroll.is_y_scrollable())
-        .map(move |need_bar| need_bar.then(|| {
-          let mut v_track = @Stack {
-            class: V_SCROLL_TRACK,
-            clamp: BoxClamp::EXPAND_Y,
-            on_wheel: move |e| $scroll.write().scroll(-e.delta_x, -e.delta_y),
-          };
-
-          @ $v_track {
-            on_tap: move |e| if e.is_primary {
-              let rate = e.position().y / $v_track.layout_height();
-              let mut scroll = Provider::write_of::<ScrollableWidget>(e).unwrap();
-              let y = rate * scroll.max_scrollable().y;
-              let scroll_pos = Point::new(scroll.get_scroll_pos().x, y);
-              scroll.jump_to(scroll_pos);
-            },
-            @Container {
-              class: V_SCROLL_THUMB,
-              size: distinct_pipe!{
-                let height = v_thumb_rate(&$scroll) * $v_track.layout_height();
-                Size::new(0., height)
-              },
-              anchor: distinct_pipe!{
-                let pos = $scroll.get_y_scroll_rate() * $v_track.layout_height();
-                Anchor::top(pos)
-              },
-            }
-          }
-        }));
-
-      let scroll = FatObj::new(scroll);
-      @Stack {
-        @ $scroll {
-          class: SCROLL_CLIENT_AREA,
-          @{ child }
-        }
-        @ { h_scrollbar }
-        @ { v_scrollbar }
-      }
-    };
-
     // Here we provide the `ScrollableWidget`, which allows the theme to access
     // scroll states or enables descendants to trigger scrolling to a different
     // position.
-    Provider::new(Box::new(this.read().scroll.clone_writer()))
-      .with_child(w)
-      .into_widget()
+    providers! {
+      providers: [Provider::value_of_writer(scroll.clone_writer(), None)],
+      @ {
+        let h_scrollbar = distinct_pipe!($scroll.is_x_scrollable())
+          .map(move |need_bar| need_bar.then(||{
+            let mut h_track = @Stack {
+              class: H_SCROLL_TRACK,
+              h_align: HAlign::Stretch,
+              on_wheel: move |e| $scroll.write().scroll(-e.delta_x, -e.delta_y),
+            };
+            let mut h_thumb =  @Container {
+              class: H_SCROLL_THUMB,
+              size: distinct_pipe!{
+                let width = h_thumb_rate(&$scroll) * $h_track.layout_width();
+                Size::new(width, 4.)
+              }
+            };
+
+            @ $h_track {
+              on_tap: move |e| if e.is_primary {
+                let rate = e.position().x / $h_track.layout_width();
+                let mut scroll = $scroll.write();
+                let x = rate * scroll.max_scrollable().x;
+                let scroll_pos = Point::new(x, scroll.get_scroll_pos().y);
+                scroll.jump_to(scroll_pos);
+              },
+              @ $h_thumb {
+                anchor: distinct_pipe!{
+                  let rate = $scroll.get_x_scroll_rate();
+                  let distance = $h_track.layout_width() - $h_thumb.layout_width();
+                  Anchor::left(rate * distance)
+                }
+              }
+            }
+          }));
+
+        let v_scrollbar = distinct_pipe!($scroll.is_y_scrollable())
+          .map(move |need_bar| need_bar.then(|| {
+            let mut v_track = @Stack {
+              class: V_SCROLL_TRACK,
+              v_align: VAlign::Stretch,
+              on_wheel: move |e| $scroll.write().scroll(-e.delta_x, -e.delta_y),
+            };
+
+            let mut v_thumb = @Container {
+              class: V_SCROLL_THUMB,
+              size: distinct_pipe!{
+                let height = v_thumb_rate(&$scroll) * $v_track.layout_height();
+                Size::new(4., height)
+              }
+            };
+
+            @ $v_track {
+              on_tap: move |e| if e.is_primary {
+                let rate = e.position().y / $v_track.layout_height();
+                let mut scroll = $scroll.write();
+                let y = rate * scroll.max_scrollable().y;
+                let scroll_pos = Point::new(scroll.get_scroll_pos().x, y);
+                scroll.jump_to(scroll_pos);
+              },
+              @ $v_thumb {
+                anchor: distinct_pipe!{
+                  let rate = $scroll.get_y_scroll_rate();
+                  let distance = $v_track.layout_height() - $v_thumb.layout_height();
+                  Anchor::top(rate * distance)
+                }
+              }
+            }
+          }));
+
+        let scroll = FatObj::new(scroll);
+        @Stack {
+          fit: StackFit::Passthrough,
+          @ $scroll {
+            class: SCROLL_CLIENT_AREA,
+            @{ child }
+          }
+          @IgnorePointer{
+            ignore: IgnoreScope::OnlySelf,
+            @UnconstrainedBox {
+              dir: UnconstrainedDir::Both,
+              clamp_dim: ClampDim::MIN_SIZE,
+              @ { h_scrollbar }
+            }
+          }
+          @IgnorePointer{
+            ignore: IgnoreScope::OnlySelf,
+            @UnconstrainedBox {
+              dir: UnconstrainedDir::Both,
+              clamp_dim: ClampDim::MIN_SIZE,
+              @ { v_scrollbar }
+            }
+          }
+        }
+      }
+    }
+    .into_widget()
   }
 }
 

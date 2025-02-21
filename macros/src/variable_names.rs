@@ -105,6 +105,8 @@ pub static BUILTIN_INFOS: phf::Map<&'static str, BuiltinMember> = phf_map! {
   "on_focus_in_capture" => builtin_member!{"MixBuiltin", Method, "mix_builtin"},
   "on_focus_out" => builtin_member!{"MixBuiltin", Method, "mix_builtin"},
   "on_focus_out_capture" => builtin_member!{"MixBuiltin", Method, "mix_builtin"},
+  "on_custom_concrete_event" => builtin_member!{"MixBuiltin", Method, "mix_builtin"},
+  "on_custom_event" => builtin_member!{"MixBuiltin", Method, "mix_builtin"},
   "events_stream" => builtin_member!{"MixBuiltin", Method, "mix_builtin"},
 
   // RequestFocus
@@ -112,15 +114,17 @@ pub static BUILTIN_INFOS: phf::Map<&'static str, BuiltinMember> = phf_map! {
   "unfocus" => builtin_member!{"RequestFocus", Method, "request_focus"},
   // FittedBox
   "box_fit" => builtin_member!{"FittedBox", Field, "fitted_box"},
-  // BoxDecoration
-  "background" => builtin_member!{"BoxDecoration", Field, "box_decoration"},
-  "border" => builtin_member!{"BoxDecoration", Field, "box_decoration"},
-  "border_radius" => builtin_member!{"BoxDecoration", Field, "box_decoration"},
+  // Background
+  "background" => builtin_member!{"Background", Field, "background"},
+  // BorderWidget
+  "border" => builtin_member!{"BorderWidget", Field, "border"},
+  // RadiusWidget
+  "radius" => builtin_member!{"RadiusWidget", Field, "radius"},
   // Foreground
   "foreground" => builtin_member! { "Foreground", Field, "foreground"},
   // PaintingStyleWidget
   "painting_style" => builtin_member! { "PaintingStyleWidget", Field, "painting_style" },
-  // TextStyleWidget
+  // TextStyle
   "text_style" => builtin_member! { "TextStyleWidget", Field, "text_style" },
   "font_size" => builtin_member! { "TextStyleWidget", Method, "text_style" },
   "font_face" => builtin_member! { "TextStyleWidget", Method, "text_style" },
@@ -170,4 +174,8 @@ pub static BUILTIN_INFOS: phf::Map<&'static str, BuiltinMember> = phf_map! {
   "tooltips" => builtin_member!{"Tooltips", Field, "tooltips"},
   // TrackWidgetId
   "track_id" => builtin_member!{"TrackWidgetId", Method, "track_id"},
+  // ClipBoundary
+  "clip_boundary" => builtin_member!{"ClipBoundary", Field, "clip_boundary"},
+  // Providers
+  "providers" => builtin_member!{"Providers", Field, "providers"},
 };

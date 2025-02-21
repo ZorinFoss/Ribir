@@ -12,7 +12,7 @@ impl Declare for ConstrainedBox {
   fn declarer() -> Self::Builder { FatObj::new(()) }
 }
 
-impl_compose_child_for_wrap_render!(ConstrainedBox);
+impl_compose_child_for_wrap_render!(ConstrainedBox, DirtyPhase::Layout);
 
 impl WrapRender for ConstrainedBox {
   fn perform_layout(&self, clamp: BoxClamp, host: &dyn Render, ctx: &mut LayoutCtx) -> Size {
@@ -44,37 +44,5 @@ mod tests {
       }
     }),
     LayoutCase::new(&[0]).with_size(Size::new(50., 50.))
-  );
-
-  widget_layout_test!(
-    expand_one_axis,
-    WidgetTester::new(fn_widget! {
-      @Container {
-        size: Size::new(256., 50.),
-        @ConstrainedBox {
-          clamp: BoxClamp::EXPAND_X,
-          @Container {
-            size: Size::new(128., 20.),
-          }
-        }
-      }
-    },),
-    LayoutCase::new(&[0, 0]).with_size(Size::new(256., 20.))
-  );
-
-  widget_layout_test!(
-    expand_both,
-    WidgetTester::new(fn_widget! {
-      @Container {
-        size: Size::new(256., 50.),
-        @ConstrainedBox {
-          clamp: BoxClamp::EXPAND_BOTH,
-          @Container {
-            size: Size::new(128., 20.),
-          }
-        }
-      }
-    }),
-    LayoutCase::new(&[0, 0]).with_size(Size::new(256., 50.))
   );
 }

@@ -11,15 +11,14 @@ impl Render for PathPaintKit {
   #[inline]
   fn perform_layout(&self, _: BoxClamp, _: &mut LayoutCtx) -> Size { Size::zero() }
 
+  fn visual_box(&self, _: &mut VisualCtx) -> Option<Rect> { Some(self.path.bounds(None)) }
+
   #[inline]
   fn only_sized_by_parent(&self) -> bool { true }
 
-  fn paint(&self, ctx: &mut PaintingCtx) {
-    let path = PaintPath::Share(self.path.clone());
-    ctx.painter().draw_path(path);
-  }
+  fn paint(&self, ctx: &mut PaintingCtx) { self.path.paint(ctx); }
 
-  fn hit_test(&self, _ctx: &HitTestCtx, _: Point) -> HitTest {
+  fn hit_test(&self, _ctx: &mut HitTestCtx, _: Point) -> HitTest {
     HitTest { hit: false, can_hit_child: false }
   }
 }

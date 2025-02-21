@@ -5,7 +5,7 @@ extern crate proc_macro;
 
 mod declare_derive;
 mod lerp_derive;
-mod part_writer;
+mod part_state;
 mod util;
 use proc_macro::TokenStream;
 use quote::quote;
@@ -51,8 +51,9 @@ pub fn multi_child_derive(input: TokenStream) -> TokenStream {
   let name = input.ident;
   quote! {
     impl #impl_generics MultiChild for #name #ty_generics #where_clause {
+      type Target<'c> = MultiPair<'c>;
       fn with_child<'c, const N: usize, const M: usize>(self, child: impl IntoChildMulti<'c, N, M>)
-        -> MultiPair<'c>
+        -> Self::Target<'c>
       {
         MultiPair::new(self, child)
       }
@@ -109,9 +110,10 @@ pub fn declare_trait_macro_derive(input: TokenStream) -> TokenStream {
 /// `State<T>` that not extend any built-in ability, and not support `pipe!` to
 /// init the field.
 #[proc_macro_attribute]
-pub fn simple_declare(_attr: TokenStream, item: TokenStream) -> TokenStream {
+pub fn simple_declare(attr: TokenStream, item: TokenStream) -> TokenStream {
   let mut input = parse_macro_input!(item as syn::ItemStruct);
-  simple_declare_attr::simple_declarer_attr(&mut input)
+  let stateless = syn::parse::<syn::Ident>(attr).is_ok_and(|i| i == "stateless");
+  simple_declare_attr::simple_declarer_attr(&mut input, stateless)
     .unwrap_or_else(|e| e.into_compile_error())
     .into()
 }
@@ -160,7 +162,7 @@ pub fn rdl(input: TokenStream) -> TokenStream { RdlMacro::gen_code(input.into(),
 /// `$name` is used to express a state reference to `name`.
 #[proc_macro]
 pub fn fn_widget(input: TokenStream) -> TokenStream {
-  fn_widget_macro::gen_code(input.into(), &mut DollarRefsCtx::top_level()).into()
+  fn_widget_macro::gen_code(input.into(), None).into()
 }
 
 /// This macro just return the input token stream. It's do nothing but help
@@ -243,7 +245,55 @@ pub fn watch(input: TokenStream) -> TokenStream { watch_macro::gen_code(input.in
 /// use of `$` is unnecessary.
 #[proc_macro]
 pub fn part_writer(input: TokenStream) -> TokenStream {
-  part_writer::gen_code(input.into(), &mut DollarRefsCtx::top_level()).into()
+  part_state::gen_part_wrier(input.into(), &mut DollarRefsCtx::top_level()).into()
+}
+
+/// The `split_writer` macro creates a split writer from a reference of a
+/// writer.
+///
+/// This macro specifically accepts simple expressions to indicate the partial
+/// of the writer, as shown in the following patterns:
+///
+/// - For a field: `split_writer!(&mut writer.xxx)`
+/// - For a method returning a reference: `split_writer!(writer.xxx())`.
+///
+/// Since it operates on a writer and not a state reference of the writer, the
+/// use of `$` is unnecessary.
+#[proc_macro]
+pub fn split_writer(input: TokenStream) -> TokenStream {
+  part_state::gen_split_wrier(input.into(), &mut DollarRefsCtx::top_level()).into()
+}
+
+/// The `map_watcher` macro creates a partial watcher from a reference of a
+/// watcher.
+///
+/// This macro specifically accepts simple expressions to indicate the partial
+/// of the watcher, as shown in the following patterns:
+///
+/// - For a field: `map_watcher!(&watcher.xxx)`
+/// - For a method returning a reference: `map_watcher!(watcher.xxx())`.
+///
+/// Since it operates on a watcher and not a state reference of the watcher, the
+/// use of `$` is unnecessary.
+#[proc_macro]
+pub fn map_watcher(input: TokenStream) -> TokenStream {
+  part_state::gen_part_watcher(input.into(), &mut DollarRefsCtx::top_level()).into()
+}
+
+/// The `part_reader` macro creates a partial reader from a reference of a
+/// reader.
+///
+/// This macro specifically accepts simple expressions to indicate the partial
+/// of the reader, as shown in the following patterns:
+///
+/// - For a field: `part_reader!(&reader.xxx)`
+/// - For a method returning a reference: `part_reader!(reader.xxx())`.
+///
+/// Since it operates on a reader and not a state reference of the reader, the
+/// use of `$` is unnecessary.
+#[proc_macro]
+pub fn part_reader(input: TokenStream) -> TokenStream {
+  part_state::gen_part_reader(input.into(), &mut DollarRefsCtx::top_level()).into()
 }
 
 /// Includes an SVG file as an `Svg`.

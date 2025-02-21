@@ -188,17 +188,6 @@ widget_layout_test!(
   LayoutCase::default().with_size(Size::new(4., 2.))
 );
 
-widget_layout_test!(
-  capture_closure_used_ctx,
-  WidgetTester::new(fn_widget! {
-    let size_box = @SizedBox { size: ZERO_SIZE };
-    @ $size_box {
-      on_mounted: move |e| $size_box.write().size = IconSize::of(&e).tiny
-    }
-  }),
-  LayoutCase::default().with_size(Size::new(18., 18.))
-);
-
 #[test]
 fn pipe_single_parent() {
   reset_test_env!();
@@ -838,10 +827,10 @@ fn fix_direct_use_map_writer_with_builtin() {
   fn _x(mut host: FatObj<Void>) {
     let _anchor = host
       .get_relative_anchor_widget()
-      .map_writer(|w| PartData::from_ref_mut(&mut w.anchor));
+      .map_writer(|w| PartMut::new(&mut w.anchor));
     let _anchor = host
       .get_relative_anchor_widget()
-      .map_writer(|w| PartData::from_ref_mut(&mut w.anchor));
+      .map_writer(|w| PartMut::new(&mut w.anchor));
   }
 }
 
