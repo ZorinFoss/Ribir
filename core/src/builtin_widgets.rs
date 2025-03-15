@@ -50,6 +50,8 @@ pub mod fitted_box;
 pub use fitted_box::*;
 pub mod svg;
 pub use svg::*;
+pub mod color_filter;
+pub use color_filter::*;
 
 pub mod clip;
 pub use clip::*;
@@ -797,8 +799,8 @@ impl<T> FatObj<T> {
   }
 
   /// Initializes the `Class` that should be applied to the widget.
-  pub fn class<const M: usize>(self, cls: impl DeclareInto<ClassName, M>) -> Self {
-    self.declare_builtin_init(cls, Self::get_class_widget, |c, cls| c.class = Some(cls))
+  pub fn class<const M: usize>(self, cls: impl DeclareInto<Option<ClassName>, M>) -> Self {
+    self.declare_builtin_init(cls, Self::get_class_widget, |c, cls| c.class = cls)
   }
 
   /// Initializes whether the `widget` should automatically get focus when the
@@ -920,12 +922,16 @@ impl<T> FatObj<T> {
   }
 
   /// Initializes the horizontal global anchor of the widget.
-  pub fn global_anchor_x<const M: usize>(self, v: impl DeclareInto<GlobalAnchorX, M>) -> Self {
+  pub fn global_anchor_x<const M: usize>(
+    self, v: impl DeclareInto<Option<GlobalAnchorX>, M>,
+  ) -> Self {
     self.declare_builtin_init(v, Self::get_global_anchor_widget, |m, v| m.global_anchor_x = v)
   }
 
   /// Initializes the vertical global anchor of the widget.
-  pub fn global_anchor_y<const M: usize>(self, v: impl DeclareInto<GlobalAnchorY, M>) -> Self {
+  pub fn global_anchor_y<const M: usize>(
+    self, v: impl DeclareInto<Option<GlobalAnchorY>, M>,
+  ) -> Self {
     self.declare_builtin_init(v, Self::get_global_anchor_widget, |m, v| m.global_anchor_y = v)
   }
 
@@ -968,12 +974,6 @@ impl<T> FatObj<T> {
         .unsubscribe_when_dropped();
       self.keep_alive_unsubscribe_handle = Some(Box::new(u));
     }
-    self
-  }
-
-  /// Initializes the track_id of the widget.
-  pub fn track_id(mut self) -> Self {
-    self.get_track_id_widget();
     self
   }
 
@@ -1203,7 +1203,7 @@ impl<T: MultiChild> MultiChild for DeclarerWithSubscription<T> {
   fn into_parent(self: Box<Self>) -> Widget<'static> { (*self).into_widget() }
 }
 
-impl<'w, T, C, const TML: bool, const WRITER: bool, const N: usize, const M: usize>
+impl<'w, T, C, const TML: usize, const WRITER: bool, const N: usize, const M: usize>
   ComposeWithChild<'w, C, WRITER, TML, N, M> for DeclarerWithSubscription<T>
 where
   T: ComposeWithChild<'w, C, WRITER, TML, N, M>,

@@ -1,7 +1,6 @@
 on:
   merge_group:
   pull_request:
-    types: [synchronize, labeled, reopened, ready_for_review]
   push:
     branches:
       - master
@@ -29,12 +28,11 @@ env:
   CI_BINARY_BUILD: "build18"
 
   # We have some features that are only available on nightly. We need to test it.
-  NIGHTLY_VERSION: "nightly-2024-10-03"
+  NIGHTLY_VERSION: "nightly-2025-03-06"
 
 name: CI
 jobs:
   lint:
-    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'B-test')
     name: rust code lint
     runs-on: ubuntu-latest
     steps:

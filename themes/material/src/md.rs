@@ -87,6 +87,8 @@ pub const SIZE_48: Size = Size::new(48., 48.);
 pub const SIZE_64: Size = Size::new(64., 64.);
 
 pub const EDGES_2: EdgeInsets = EdgeInsets::all(2.);
+pub const EDGES_HOR_2: EdgeInsets = EdgeInsets::horizontal(2.);
+pub const EDGES_VER_2: EdgeInsets = EdgeInsets::vertical(2.);
 
 pub const EDGES_4: EdgeInsets = EdgeInsets::all(4.);
 pub const EDGES_HOR_4: EdgeInsets = EdgeInsets::horizontal(4.);
@@ -97,20 +99,53 @@ pub const EDGES_TOP_4: EdgeInsets = EdgeInsets::only_top(4.);
 pub const EDGES_BOTTOM_4: EdgeInsets = EdgeInsets::only_bottom(4.);
 
 pub const EDGES_HOR_6: EdgeInsets = EdgeInsets::horizontal(6.);
+
+pub const EDGES_8: EdgeInsets = EdgeInsets::all(8.);
 pub const EDGES_HOR_8: EdgeInsets = EdgeInsets::horizontal(8.);
+pub const EDGES_VER_8: EdgeInsets = EdgeInsets::vertical(8.);
+pub const EDGES_LEFT_8: EdgeInsets = EdgeInsets::only_left(8.);
+pub const EDGES_RIGHT_8: EdgeInsets = EdgeInsets::only_right(8.);
+pub const EDGES_TOP_8: EdgeInsets = EdgeInsets::only_top(8.);
+pub const EDGES_BOTTOM_8: EdgeInsets = EdgeInsets::only_bottom(8.);
 
 pub const EDGES_10: EdgeInsets = EdgeInsets::all(10.);
+pub const EDGES_VER_10: EdgeInsets = EdgeInsets::vertical(10.);
+pub const EDGES_TOP_10: EdgeInsets = EdgeInsets::only_top(10.);
+pub const EDGES_BOTTOM_10: EdgeInsets = EdgeInsets::only_bottom(10.);
 
 pub const EDGES_HOR_12: EdgeInsets = EdgeInsets::horizontal(12.);
+pub const EDGES_VER_12: EdgeInsets = EdgeInsets::vertical(12.);
+
+pub const EDGES_VER_14: EdgeInsets = EdgeInsets::vertical(14.);
 
 pub const EDGES_16: EdgeInsets = EdgeInsets::all(16.);
 pub const EDGES_HOR_16: EdgeInsets = EdgeInsets::horizontal(16.);
+pub const EDGES_VER_16: EdgeInsets = EdgeInsets::vertical(16.);
+pub const EDGES_LEFT_16: EdgeInsets = EdgeInsets::only_left(16.);
+pub const EDGES_RIGHT_16: EdgeInsets = EdgeInsets::only_right(16.);
+pub const EDGES_TOP_16: EdgeInsets = EdgeInsets::only_top(16.);
+pub const EDGES_BOTTOM_16: EdgeInsets = EdgeInsets::only_bottom(16.);
+
 pub const EDGES_HOR_24: EdgeInsets = EdgeInsets::horizontal(24.);
 pub const EDGES_HOR_32: EdgeInsets = EdgeInsets::horizontal(32.);
 pub const EDGES_HOR_36: EdgeInsets = EdgeInsets::horizontal(36.);
 pub const EDGES_HOR_48: EdgeInsets = EdgeInsets::horizontal(48.);
 
 // Borders
+pub fn border_1(color: Color) -> Border { Border::all(BorderSide::new(1., color.into())) }
+
+pub fn border_1_top(color: Color) -> Border { Border::only_top(BorderSide::new(1., color.into())) }
+
+pub fn border_1_right(color: Color) -> Border {
+  Border::only_right(BorderSide::new(1., color.into()))
+}
+pub fn border_1_bottom(color: Color) -> Border {
+  Border::only_bottom(BorderSide::new(1., color.into()))
+}
+pub fn border_1_left(color: Color) -> Border {
+  Border::only_left(BorderSide::new(1., color.into()))
+}
+
 pub fn border_2() -> VariantMap<Color, impl Fn(Color) -> Border> {
   BuildCtx::color().map(|color| Border::all(BorderSide::new(2., color.into())))
 }

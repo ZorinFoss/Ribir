@@ -21,18 +21,21 @@ pub(super) fn init(classes: &mut Classes) {
     .into_widget()
   });
 
-  classes.insert(TEXT_SELECTION, style_class! {
-    background: {
-      let color = BuildCtx::color();
-      color.into_container_color(BuildCtx::get()).map(|c| c.with_alpha(0.8))
-    }
-  });
+  classes.insert(
+    TEXT_SELECTION,
+    style_class! {
+      background: {
+        let color = BuildCtx::color();
+        color.into_container_color(BuildCtx::get()).map(|c| c.with_alpha(0.8))
+      }
+    },
+  );
 
   fn input_border(w: Widget) -> Widget {
     let mut w = FatObj::new(w);
     let blur = Palette::of(BuildCtx::get()).on_surface_variant();
     let border = match BuildCtx::color() {
-      Variant::Stateful(v) => pipe! {
+      Variant::Watcher(v) => pipe! {
         let color = if $w.has_focus() { *$v } else { blur };
         Border::all(BorderSide::new(1., color.into()))
       }

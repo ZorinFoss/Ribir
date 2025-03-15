@@ -69,6 +69,11 @@ pub trait StateWatcher: StateReader {
   where
     Self: Sized;
 
+  /// Convert the writer to a reader if no other writers exist.
+  fn into_reader(self) -> Result<Self::Reader, Self>
+  where
+    Self: Sized;
+
   /// Return a modifies `Rx` stream of the state, user can subscribe it to
   /// response the state changes.
   fn modifies(&self) -> BoxOp<'static, ModifyScope, Infallible> {
@@ -103,11 +108,6 @@ pub trait StateWatcher: StateReader {
 }
 
 pub trait StateWriter: StateWatcher {
-  /// Convert the writer to a reader if no other writers exist.
-  fn into_reader(self) -> Result<Self::Reader, Self>
-  where
-    Self: Sized;
-
   /// Return a write reference of this state.
   fn write(&self) -> WriteRef<Self::Value>;
   /// Return a silent write reference which notifies will be ignored by the
@@ -220,6 +220,17 @@ impl<T: 'static> StateReader for State<T> {
 
 impl<T: 'static> StateWatcher for State<T> {
   type Watcher = Watcher<Self::Reader>;
+
+  fn into_reader(self) -> Result<Self::Reader, Self>
+  where
+    Self: Sized,
+  {
+    match self.0.into_inner() {
+      InnerState::Data(d) => Ok(Reader(Sc::new(d))),
+      InnerState::Stateful(s) => s.into_reader().map_err(State::stateful),
+    }
+  }
+
   #[inline]
   fn clone_boxed_watcher(&self) -> Box<dyn StateWatcher<Value = Self::Value>> {
     Box::new(self.clone_watcher())
@@ -237,16 +248,6 @@ impl<T: 'static> StateWatcher for State<T> {
 }
 
 impl<T: 'static> StateWriter for State<T> {
-  fn into_reader(self) -> Result<Self::Reader, Self>
-  where
-    Self: Sized,
-  {
-    match self.0.into_inner() {
-      InnerState::Data(d) => Ok(Reader(Sc::new(d))),
-      InnerState::Stateful(s) => s.into_reader().map_err(State::stateful),
-    }
-  }
-
   #[inline]
   fn write(&self) -> WriteRef<T> { self.as_stateful().write() }
 
@@ -373,12 +374,10 @@ impl<'a, V: ?Sized> WriteRef<'a, V> {
     let borrow = orig.value.borrow.clone();
     let a = ValueMutRef { inner: a, borrow: borrow.clone() };
     let b = ValueMutRef { inner: b, borrow };
-    (WriteRef { value: a, modified, modify_scope, info }, WriteRef {
-      value: b,
-      modified,
-      modify_scope,
-      info,
-    })
+    (
+      WriteRef { value: a, modified, modify_scope, info },
+      WriteRef { value: b, modified, modify_scope, info },
+    )
   }
 
   /// Forget all modifies of this reference. So all the modifies occurred on
@@ -438,7 +437,7 @@ struct ReaderRender<T>(pub(crate) T);
 
 impl<T> WriterRender<T>
 where
-  T: StateWriter,
+  T: StateWatcher,
   T::Value: Render + Sized,
 {
   pub fn into_widget(self) -> Widget<'static> {
@@ -492,6 +491,9 @@ impl<V: ?Sized + 'static> StateWatcher for Box<dyn StateWatcher<Value = V>> {
   type Watcher = Box<dyn StateWatcher<Value = V>>;
 
   #[inline]
+  fn into_reader(self) -> Result<Self::Reader, Self> { Err(self) }
+
+  #[inline]
   fn raw_modifies(&self) -> CloneableBoxOp<'static, ModifyScope, Infallible> {
     (**self).raw_modifies()
   }
@@ -523,6 +525,10 @@ impl<V: ?Sized + 'static> StateReader for Box<dyn StateWriter<Value = V>> {
 
 impl<V: ?Sized + 'static> StateWatcher for Box<dyn StateWriter<Value = V>> {
   type Watcher = Box<dyn StateWatcher<Value = Self::Value>>;
+
+  #[inline]
+  fn into_reader(self) -> Result<Self::Reader, Self> { Err(self) }
+
   #[inline]
   fn raw_modifies(&self) -> CloneableBoxOp<'static, ModifyScope, Infallible> {
     (**self).raw_modifies()
@@ -538,8 +544,6 @@ impl<V: ?Sized + 'static> StateWatcher for Box<dyn StateWriter<Value = V>> {
 }
 
 impl<V: ?Sized + 'static> StateWriter for Box<dyn StateWriter<Value = V>> {
-  #[inline]
-  fn into_reader(self) -> Result<Self::Reader, Self> { Err(self) }
   #[inline]
   fn write(&self) -> WriteRef<Self::Value> { (**self).write() }
   #[inline]

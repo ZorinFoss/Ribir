@@ -87,7 +87,7 @@ impl<const M: u8> Render for StateLayer<M> {
   fn perform_layout(&self, clamp: BoxClamp, _: &mut LayoutCtx) -> Size { clamp.min }
 
   fn visual_box(&self, ctx: &mut VisualCtx) -> Option<Rect> {
-    Some(Rect::from_size(ctx.box_size().unwrap()))
+    Some(Rect::from_size(ctx.box_size()?))
   }
 
   fn paint(&self, ctx: &mut PaintingCtx) {
@@ -110,6 +110,12 @@ impl<const M: u8> Render for StateLayer<M> {
   }
 
   fn dirty_phase(&self) -> DirtyPhase { DirtyPhase::Paint }
+
+  fn hit_test(&self, _: &mut HitTestCtx, _: Point) -> HitTest {
+    // This widget only serves as a visual effect and should not affect the hit
+    // test.
+    HitTest { hit: false, can_hit_child: false }
+  }
 }
 
 /// The path of a state layer to fill can either be a radius that fills the

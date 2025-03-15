@@ -192,6 +192,11 @@ macro_rules! smooth_size_widget_impl {
         self.clamp_layout_clamp(&mut clamp);
         host.perform_layout(clamp, ctx)
       }
+
+      fn dirty_phase(&self, host: &dyn Render) -> DirtyPhase {
+        let dirty = host.dirty_phase();
+        if dirty != DirtyPhase::LayoutSubtree { DirtyPhase::Layout } else { dirty }
+      }
     }
 
     impl_compose_child!($name, DirtyPhase::Layout);
@@ -261,6 +266,11 @@ macro_rules! smooth_pos_widget_impl {
           ctx.painter().translate(offset.x, offset.y);
         }
         host.paint(ctx);
+      }
+
+      fn dirty_phase(&self, host: &dyn Render) -> DirtyPhase {
+        let dirty = host.dirty_phase();
+        if dirty != DirtyPhase::LayoutSubtree { DirtyPhase::Layout } else { dirty }
       }
     }
 
@@ -612,7 +622,7 @@ mod tests {
 
     assert_widget_eq_image!(
       WidgetTester::new(self::column! {
-        clamp: BoxClamp::fixed_width(100.),
+        clamp: BoxClamp::default().with_max_width(100.),
         align_items: Align::Center,
         // If no initial value is provided, the widget should start at its real place.
         @SmoothX {
@@ -631,6 +641,7 @@ mod tests {
           init_value: HAnchor::Right(0f32.into()),
           @red_block_10_x_10()
         }
+        @SizedBox { size: Size::new(100., 10.) }
       })
       .with_wnd_size(Size::new(100., 30.))
       .on_initd(|wnd| wnd.set_flags(WindowFlags::ANIMATIONS)),
@@ -645,7 +656,7 @@ mod tests {
 
     assert_widget_eq_image!(
       WidgetTester::new(self::row! {
-        clamp: BoxClamp::fixed_height(100.),
+        clamp: BoxClamp::default().with_max_height(100.),
         align_items: Align::Center,
         // If no initial value is provided, the widget should start at its real place.
         @SmoothY {
@@ -664,6 +675,7 @@ mod tests {
           init_value: VAnchor::Bottom(0f32.into()),
           @red_block_10_x_10()
         }
+        @SizedBox { size: Size::new(10., 100.) }
       })
       .with_wnd_size(Size::new(30., 100.))
       .on_initd(|wnd| wnd.set_flags(WindowFlags::ANIMATIONS)),

@@ -14,18 +14,24 @@ pub(super) fn init(classes: &mut Classes) {
   // inheriting the ancestor class implementation of `SCROLL_CLIENT_AREA`.
   classes.insert(SCROLL_CLIENT_AREA, empty_cls);
 
-  classes.insert(H_SCROLL_THUMB, style_class! {
-    background: BuildCtx::color(),
-    radius: md::RADIUS_4,
-    margin: EdgeInsets::vertical(1.),
-    clamp: BoxClamp::min_width(THUMB_MIN_SIZE).with_fixed_height(md::THICKNESS_8)
-  });
-  classes.insert(V_SCROLL_THUMB, style_class! {
-    background: BuildCtx::color(),
-    radius: md::RADIUS_4,
-    margin: EdgeInsets::horizontal(1.),
-    clamp: BoxClamp::min_height(THUMB_MIN_SIZE).with_fixed_width(md::THICKNESS_8)
-  });
+  classes.insert(
+    H_SCROLL_THUMB,
+    style_class! {
+      background: BuildCtx::color(),
+      radius: md::RADIUS_4,
+      margin: EdgeInsets::vertical(1.),
+      clamp: BoxClamp::min_width(THUMB_MIN_SIZE).with_fixed_height(md::THICKNESS_8)
+    },
+  );
+  classes.insert(
+    V_SCROLL_THUMB,
+    style_class! {
+      background: BuildCtx::color(),
+      radius: md::RADIUS_4,
+      margin: EdgeInsets::horizontal(1.),
+      clamp: BoxClamp::min_height(THUMB_MIN_SIZE).with_fixed_width(md::THICKNESS_8)
+    },
+  );
 
   classes.insert(H_SCROLL_TRACK, |w| style_track(w, true));
   classes.insert(V_SCROLL_TRACK, |w| style_track(w, false));
@@ -46,7 +52,7 @@ fn style_track(w: Widget, is_hor: bool) -> Widget {
       visible: false,
       background: match Variant::<ContainerColor>::new(BuildCtx::get()).unwrap() {
         Variant::Value(c) => pipe!(track_color(c.0, $w.is_hover())).declare_into(),
-        Variant::Stateful(c) => pipe!(track_color($c.0, $w.is_hover())).declare_into()
+        Variant::Watcher(c) => pipe!(track_color($c.0, $w.is_hover())).declare_into()
       }
     };
 

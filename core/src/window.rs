@@ -158,6 +158,13 @@ impl Window {
       .focus_next_widget(self.tree());
   }
 
+  pub fn request_focus(&self, wid: WidgetId) {
+    self
+      .focus_mgr
+      .borrow_mut()
+      .request_focus_to(Some(wid));
+  }
+
   /// Request switch the focus to prev widget.
   pub fn request_prev_focus(&self) {
     self
@@ -256,11 +263,23 @@ impl Window {
   }
 
   pub fn layout(&self) {
+    let mut layout_queue = Vec::with_capacity(64);
+    let mut notified_widgets = ahash::HashSet::default();
+
     loop {
       self.run_frame_tasks();
 
       let tree = self.tree_mut();
-      tree.layout(self.shell_wnd.borrow().inner_size());
+      tree.layout(self.shell_wnd.borrow().inner_size(), &mut layout_queue);
+
+      // Process layout completion events
+      layout_queue
+        .drain(..)
+        .filter(|id| notified_widgets.insert(*id))
+        .for_each(|id| {
+          self.add_delay_event(DelayEvent::PerformedLayout(id));
+        });
+      notified_widgets.clear();
       self.run_frame_tasks();
 
       if !tree.is_dirty() {
@@ -634,13 +653,14 @@ impl Window {
       .ancestors(tree)
       .take_while(|id| Some(*id) != up)
       .all(|id| {
-        e.bubble_to_parent(id);
-        id.query_all_iter::<MixBuiltin>(tree).all(|m| {
+        let is_propagation = id.query_all_iter::<MixBuiltin>(tree).all(|m| {
           if m.contain_flag(e.flags()) {
             m.dispatch(e);
           }
           e.is_propagation()
-        })
+        });
+        e.bubble_to_parent(id);
+        is_propagation
       });
   }
 
@@ -673,6 +693,8 @@ impl Window {
   pub fn widget_size(&self, id: WidgetId) -> Option<Size> { self.tree().store.layout_box_size(id) }
 
   pub fn widget_pos(&self, id: WidgetId) -> Option<Point> { self.tree().store.layout_box_pos(id) }
+
+  pub fn is_valid_widget(&self, id: WidgetId) -> bool { !id.is_dropped(self.tree()) }
 
   pub(crate) fn tree(&self) -> &WidgetTree {
     // Safety: Please refer to the comments in `WidgetTree::tree_mut` for more

@@ -6,12 +6,16 @@ use typography::PlaceLineDirection;
 use crate::prelude::*;
 
 pub type TextInit = DeclareInit<CowArc<str>>;
-/// The text widget display text with a single style.
+/// The text widget displays text with a single style.
+///
+/// The `TextStyle` provider is utilized to format the text.
+///
+/// The `TextAlign` provider is used to align multiline text within the text
+/// bounds, with the default alignment being
+/// `TextAlign::Start`.
 #[derive(Declare)]
 pub struct Text {
   pub text: CowArc<str>,
-  #[declare(default = TextAlign::Start)]
-  pub text_align: TextAlign,
   #[declare(skip)]
   glyphs: RefCell<Option<VisualGlyphs>>,
 }
@@ -51,8 +55,8 @@ pub fn paint_text(
 impl Render for Text {
   fn perform_layout(&self, clamp: BoxClamp, ctx: &mut LayoutCtx) -> Size {
     let style = Provider::of::<TextStyle>(ctx).unwrap();
-
-    let glyphs = text_glyph(self.text.substr(..), &style, self.text_align, clamp.max);
+    let text_align = Provider::of::<TextAlign>(ctx).map_or(TextAlign::Start, |t| *t);
+    let glyphs = text_glyph(self.text.substr(..), &style, text_align, clamp.max);
 
     let size = glyphs.visual_rect().size;
     *self.glyphs.borrow_mut() = Some(glyphs);
@@ -75,15 +79,6 @@ impl Render for Text {
   fn only_sized_by_parent(&self) -> bool { false }
 
   fn paint(&self, ctx: &mut PaintingCtx) {
-    let box_rect = Rect::from_size(ctx.box_size().unwrap());
-    if ctx
-      .painter()
-      .intersection_paint_bounds(&box_rect)
-      .is_none()
-    {
-      return;
-    };
-
     let style = Provider::of::<PaintingStyle>(ctx).map(|p| p.clone());
     let visual_glyphs = self.glyphs().unwrap();
     let rect = visual_glyphs.visual_rect();
@@ -93,7 +88,7 @@ impl Render for Text {
 
 impl Text {
   pub fn new<const M: u8>(text: impl Into<CowArc<str>>) -> Self {
-    Self { text: text.into(), text_align: TextAlign::Start, glyphs: Default::default() }
+    Self { text: text.into(), glyphs: Default::default() }
   }
   pub fn glyphs(&self) -> Option<Ref<VisualGlyphs>> {
     Ref::filter_map(self.glyphs.borrow(), |v| v.as_ref()).ok()

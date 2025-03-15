@@ -51,25 +51,30 @@ pub struct VisualGlyphs {
 }
 
 impl VisualGlyphs {
-  pub fn new(
-    font_size: f32, line_dir: PlaceLineDirection, order_info: Sc<ReorderResult>,
-    bound_width: GlyphUnit, bound_height: GlyphUnit, visual_info: Sc<VisualInfos>,
-  ) -> Self {
-    let (mut x, mut y) = <_>::default();
+  pub fn new(font_size: f32, order_info: Sc<ReorderResult>, visual_info: Sc<VisualInfos>) -> Self {
+    Self { font_size, visual_info, order_info, x: GlyphUnit::ZERO, y: GlyphUnit::ZERO }
+  }
+
+  pub fn align(&mut self, display_bounds: Rect) {
+    let display_bounds = display_bounds / self.font_size * GlyphUnit::PIXELS_PER_EM as f32;
+    self.x = GlyphUnit::from_pixel(display_bounds.min_x());
+    self.y = GlyphUnit::from_pixel(display_bounds.min_y());
+    let bound_width = GlyphUnit::from_pixel(display_bounds.width());
+    let bound_height = GlyphUnit::from_pixel(display_bounds.height());
+    let VisualInfos { text_align, line_dir, visual_size, .. } = *self.visual_info;
 
     if line_dir.is_horizontal() {
-      y += text_align_offset(visual_info.visual_height, bound_height, visual_info.text_align);
+      self.y += text_align_offset(visual_size.height, bound_height, text_align);
     } else {
-      x += text_align_offset(visual_info.visual_width, bound_width, visual_info.text_align);
+      self.x += text_align_offset(visual_size.width, bound_width, text_align);
     }
 
     if line_dir == PlaceLineDirection::RightToLeft {
-      x += bound_width - visual_info.visual_width
+      self.x += bound_width - visual_size.width;
     }
     if line_dir == PlaceLineDirection::BottomToTop {
-      y += bound_height - visual_info.visual_height
+      self.y += bound_height - visual_size.height;
     }
-    Self { font_size, x, y, visual_info, order_info }
   }
 
   pub fn font_size(&self) -> f32 { self.font_size }
@@ -90,10 +95,18 @@ impl TypographyStore {
 
   /// Do a simply typography that only support single style.
   pub fn typography(
-    &mut self, text: Substr, style: &TextStyle, bounds: Size, text_align: TextAlign,
+    &mut self, text: Substr, style: &TextStyle, bounds: Size, mut text_align: TextAlign,
     baseline: GlyphBaseline, line_dir: PlaceLineDirection,
   ) -> VisualGlyphs {
     let TextStyle { font_size, ref font_face, letter_space, line_height, overflow } = *style;
+    if text_align != TextAlign::Start {
+      // If the text align is not start, we must ensure that the bounds are finite.
+      if (!bounds.width.is_finite() && !line_dir.is_horizontal())
+        || (!bounds.height.is_finite() && line_dir.is_horizontal())
+      {
+        text_align = TextAlign::Start;
+      }
+    }
     // Since we cache the result of the standard font size, we must ensure that all
     // variables are cast relative to this standard font size.
     let scale = font_size / GlyphUnit::PIXELS_PER_EM as f32;
@@ -144,7 +157,7 @@ impl TypographyStore {
       infos
     };
 
-    VisualGlyphs::new(font_size, line_dir, info, bounds.width, bounds.height, infos.clone())
+    VisualGlyphs::new(font_size, info, infos.clone())
   }
 
   pub fn font_db(&self) -> &Sc<RefCell<FontDB>> { &self.font_db }
@@ -157,7 +170,10 @@ impl VisualGlyphs {
 
     Rect::new(
       Point::new(self.to_pixel_value(self.x), self.to_pixel_value(self.y)),
-      Size::new(self.to_pixel_value(info.visual_width), self.to_pixel_value(info.visual_height)),
+      Size::new(
+        self.to_pixel_value(info.visual_size.width),
+        self.to_pixel_value(info.visual_size.height),
+      ),
     )
   }
 
@@ -165,7 +181,7 @@ impl VisualGlyphs {
     let scale = self.font_size / GlyphUnit::PIXELS_PER_EM as f32;
     let x = GlyphUnit::from_pixel(offset_x / scale) - self.x;
     let y = GlyphUnit::from_pixel(offset_y / scale) - self.y;
-    let mut bottom = self.visual_info.visual_height;
+    let mut bottom = self.visual_info.visual_size.height;
 
     let mut iter = self
       .visual_info
@@ -488,6 +504,8 @@ impl TypographyKey {
 mod tests {
   use core::f32;
 
+  use lyon_algorithms::geom::euclid::Rect;
+
   use super::*;
   use crate::FontFamily;
 
@@ -576,7 +594,9 @@ mod tests {
       let text = "Hello--------\nworld!".into();
       let style = text_style(10., overflow, 2.);
 
-      let info = typography_text(text, &style, bounds, text_align, line_dir);
+      let mut info = typography_text(text, &style, bounds, text_align, line_dir);
+      info.align(Rect::from_size(bounds));
+
       let visual_rc = info.visual_rect();
       info
         .glyphs_in_bounds(&Rect::from_size(bounds))
@@ -594,29 +614,32 @@ mod tests {
       TextAlign::Start,
       PlaceLineDirection::TopToBottom,
     );
-    assert_eq!(&not_bounds, &[
-      (0.0, 0.0),
-      (9.520508, 0.0),
-      (17.672852, 0.0),
-      (22.451172, 0.0),
-      (27.229492, 0.0),
-      (35.533203, 0.0),
-      (41.1416, 0.0),
-      (46.75, 0.0),
-      (52.3584, 0.0),
-      (57.967773, 0.0),
-      (63.57617, 0.0),
-      (69.18457, 0.0),
-      (74.79297, 0.0),
-      (80.40137, 0.0),
-      // second line
-      (0.0, 10.0),
-      (10.1796875, 10.0),
-      (18.297852, 10.0),
-      (24.40918, 10.0),
-      (29.1875, 10.0),
-      (37.535156, 10.0)
-    ]);
+    assert_eq!(
+      &not_bounds,
+      &[
+        (0.0, 0.0),
+        (9.520508, 0.0),
+        (17.672852, 0.0),
+        (22.451172, 0.0),
+        (27.229492, 0.0),
+        (35.533203, 0.0),
+        (41.1416, 0.0),
+        (46.75, 0.0),
+        (52.3584, 0.0),
+        (57.967773, 0.0),
+        (63.57617, 0.0),
+        (69.18457, 0.0),
+        (74.79297, 0.0),
+        (80.40137, 0.0),
+        // second line
+        (0.0, 10.0),
+        (10.1796875, 10.0),
+        (18.297852, 10.0),
+        (24.40918, 10.0),
+        (29.1875, 10.0),
+        (37.535156, 10.0)
+      ]
+    );
 
     let r_align = glyphs(
       TextOverflow::Overflow,
@@ -624,29 +647,32 @@ mod tests {
       TextAlign::End,
       PlaceLineDirection::TopToBottom,
     );
-    assert_eq!(&r_align, &[
-      (12.28418, 0.0),
-      (21.804688, 0.0),
-      (29.957031, 0.0),
-      (34.73535, 0.0),
-      (39.51367, 0.0),
-      (47.817383, 0.0),
-      (53.42578, 0.0),
-      (59.03418, 0.0),
-      (64.64258, 0.0),
-      (70.25195, 0.0),
-      (75.86035, 0.0),
-      (81.46875, 0.0),
-      (87.07715, 0.0),
-      (92.68555, 0.0),
-      // second line
-      (56.458008, 10.0),
-      (66.63672, 10.0),
-      (74.75488, 10.0),
-      (80.86621, 10.0),
-      (85.64453, 10.0),
-      (93.99219, 10.0)
-    ],);
+    assert_eq!(
+      &r_align,
+      &[
+        (12.28418, 0.0),
+        (21.804688, 0.0),
+        (29.957031, 0.0),
+        (34.73535, 0.0),
+        (39.51367, 0.0),
+        (47.817383, 0.0),
+        (53.42578, 0.0),
+        (59.03418, 0.0),
+        (64.64258, 0.0),
+        (70.25195, 0.0),
+        (75.86035, 0.0),
+        (81.46875, 0.0),
+        (87.07715, 0.0),
+        (92.68555, 0.0),
+        // second line
+        (56.458008, 10.0),
+        (66.63672, 10.0),
+        (74.75488, 10.0),
+        (80.86621, 10.0),
+        (85.64453, 10.0),
+        (93.99219, 10.0)
+      ],
+    );
 
     let bottom = glyphs(
       TextOverflow::Overflow,
@@ -655,30 +681,33 @@ mod tests {
       PlaceLineDirection::BottomToTop,
     );
 
-    assert_eq!(&bottom, &[
-      // first line
-      (0.0, 90.),
-      (10.1796875, 90.),
-      (18.297852, 90.),
-      (24.40918, 90.),
-      (29.1875, 90.),
-      (37.535156, 90.),
-      // second line
-      (0.0, 80.),
-      (9.520508, 80.),
-      (17.672852, 80.),
-      (22.451172, 80.),
-      (27.229492, 80.),
-      (35.533203, 80.),
-      (41.1416, 80.),
-      (46.75, 80.),
-      (52.3584, 80.),
-      (57.967773, 80.),
-      (63.57617, 80.),
-      (69.18457, 80.),
-      (74.79297, 80.),
-      (80.40137, 80.)
-    ],);
+    assert_eq!(
+      &bottom,
+      &[
+        // first line
+        (0.0, 90.),
+        (10.1796875, 90.),
+        (18.297852, 90.),
+        (24.40918, 90.),
+        (29.1875, 90.),
+        (37.535156, 90.),
+        // second line
+        (0.0, 80.),
+        (9.520508, 80.),
+        (17.672852, 80.),
+        (22.451172, 80.),
+        (27.229492, 80.),
+        (35.533203, 80.),
+        (41.1416, 80.),
+        (46.75, 80.),
+        (52.3584, 80.),
+        (57.967773, 80.),
+        (63.57617, 80.),
+        (69.18457, 80.),
+        (74.79297, 80.),
+        (80.40137, 80.)
+      ],
+    );
 
     let center_clip = glyphs(
       TextOverflow::Overflow,
@@ -687,22 +716,25 @@ mod tests {
       PlaceLineDirection::TopToBottom,
     );
 
-    assert_eq!(&center_clip, &[
-      (-1.40625, 0.0),
-      (3.3720703, 0.0),
-      (11.675781, 0.0),
-      (17.28418, 0.0),
-      (22.892578, 0.0),
-      (28.500977, 0.0),
-      (34.11035, 0.0),
-      (39.71875, 0.0),
-      (-1.7705078, 10.0),
-      (8.408203, 10.0),
-      (16.527344, 10.0),
-      (22.638672, 10.0),
-      (27.416992, 10.0),
-      (35.76465, 10.0)
-    ],);
+    assert_eq!(
+      &center_clip,
+      &[
+        (-1.40625, 0.0),
+        (3.3720703, 0.0),
+        (11.675781, 0.0),
+        (17.28418, 0.0),
+        (22.892578, 0.0),
+        (28.500977, 0.0),
+        (34.11035, 0.0),
+        (39.71875, 0.0),
+        (-1.7705078, 10.0),
+        (8.408203, 10.0),
+        (16.527344, 10.0),
+        (22.638672, 10.0),
+        (27.416992, 10.0),
+        (35.76465, 10.0)
+      ],
+    );
   }
 
   #[test]
@@ -806,23 +838,29 @@ mod tests {
     let text: Substr = "1234".into();
 
     let style = zero_letter_space_style(16., TextOverflow::Overflow);
-    let glyphs1 = store.typography(
+    let bounds1 =
+      Size::new(10. * GlyphUnit::PIXELS_PER_EM as f32, 2. * GlyphUnit::PIXELS_PER_EM as f32);
+    let mut glyphs1 = store.typography(
       text.clone(),
       &style,
-      Size::new(10. * GlyphUnit::PIXELS_PER_EM as f32, 2. * GlyphUnit::PIXELS_PER_EM as f32),
+      bounds1,
       TextAlign::Center,
       GlyphBaseline::Alphabetic,
       PlaceLineDirection::TopToBottom,
     );
+    glyphs1.align(Rect::from_size(bounds1));
 
-    let glyphs2 = store.typography(
+    let bounds2 =
+      Size::new(20. * GlyphUnit::PIXELS_PER_EM as f32, 2. * GlyphUnit::PIXELS_PER_EM as f32);
+    let mut glyphs2 = store.typography(
       text,
       &style,
-      Size::new(20.0 * GlyphUnit::PIXELS_PER_EM as f32, 2.0 * GlyphUnit::PIXELS_PER_EM as f32),
+      bounds2,
       TextAlign::Center,
       GlyphBaseline::Alphabetic,
       PlaceLineDirection::TopToBottom,
     );
+    glyphs2.align(Rect::from_size(bounds2));
 
     let offset_x = 5. * GlyphUnit::PIXELS_PER_EM as f32;
     assert_eq!(

@@ -5,7 +5,7 @@ impl Render for Svg {
   fn perform_layout(&self, clamp: BoxClamp, _: &mut LayoutCtx) -> Size { clamp.clamp(self.size()) }
 
   fn visual_box(&self, ctx: &mut VisualCtx) -> Option<Rect> {
-    Some(Rect::from_size(ctx.box_size().unwrap()))
+    Some(Rect::from_size(ctx.box_size()?))
   }
 
   fn paint(&self, ctx: &mut PaintingCtx) {
@@ -46,8 +46,11 @@ pub mod named_svgs {
 
   /// Functions similarly to [`named_svgs::get`](get), but returns the
   /// default SVG if not found.
-  pub fn get_or_default(name: &str) -> Svg {
-    get(name).unwrap_or_else(|| get(DEFAULT_SVG_KEY).unwrap())
+  pub fn get_or_default(name: &str) -> Svg { get(name).unwrap_or_else(default) }
+
+  /// Provides fallback SVG content when a requested named asset is unavailable
+  pub fn default() -> Svg {
+    get(DEFAULT_SVG_KEY).expect("Default SVG asset should be preloaded in all execution contexts")
   }
 
   pub fn reset() {

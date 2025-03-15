@@ -49,6 +49,7 @@ impl<'c> ComposeChild<'c> for ScrollableWidget {
   fn compose_child(this: impl StateWriter<Value = Self>, child: Self::Child) -> Widget<'c> {
     fn_widget! {
       let mut view = @Viewport {
+        clip_boundary: true,
         scroll_dir: distinct_pipe!{
           let this = $this;
           this.scrollable
@@ -89,6 +90,25 @@ impl<'c> ComposeChild<'c> for ScrollableWidget {
 }
 
 impl ScrollableWidget {
+  /// Returns the reference of the closest scrollable widget from the context.
+  #[inline]
+  pub fn of(ctx: &impl AsRef<ProviderCtx>) -> Option<QueryRef<Self>> { Provider::of::<Self>(ctx) }
+
+  /// Returns the write reference of the closest scrollable widget from the
+  /// context.
+  #[inline]
+  pub fn write_of(ctx: &impl AsRef<ProviderCtx>) -> Option<WriteRef<Self>> {
+    Provider::write_of::<Self>(ctx)
+  }
+
+  /// Returns the writer of the closest scrollable widget from the context.
+  #[inline]
+  pub fn boxed_writer_of(
+    ctx: &impl AsRef<ProviderCtx>,
+  ) -> Option<Box<dyn StateWriter<Value = Self>>> {
+    Provider::state_of::<Box<dyn StateWriter<Value = Self>>>(ctx).map(|s| s.clone_boxed_writer())
+  }
+
   pub fn map_to_view(&self, p: Point, child: WidgetId, wnd: &Window) -> Option<Point> {
     let view_id = self.view_id.as_ref()?.get()?;
     let pos = wnd.map_to_global(p, child);
@@ -120,9 +140,9 @@ impl ScrollableWidget {
     let offset_x = anchor
       .x
       .or_else(|| {
-        if rect.min_x() > self.scroll_pos.x + view_size.width {
+        if rect.max_x() > self.scroll_pos.x + view_size.width {
           Some(HAnchor::Right(0.0.into()))
-        } else if rect.max_x() < self.scroll_pos.x {
+        } else if rect.min_x() < self.scroll_pos.x {
           Some(HAnchor::Left(0.0.into()))
         } else {
           None
@@ -133,9 +153,9 @@ impl ScrollableWidget {
     let offset_y = anchor
       .y
       .or_else(|| {
-        if rect.min_y() > view_size.height + self.scroll_pos.y {
+        if rect.max_y() > view_size.height + self.scroll_pos.y {
           Some(VAnchor::Bottom(0.0.into()))
-        } else if rect.max_y() < self.scroll_pos.y {
+        } else if rect.min_y() < self.scroll_pos.y {
           Some(VAnchor::Top(0.0.into()))
         } else {
           None
@@ -238,7 +258,14 @@ impl Render for Viewport {
       child_clamp.max.width = f32::INFINITY;
     }
 
-    let child_size = ctx.assert_perform_single_child_layout(child_clamp);
+    let mut child_size = ctx.assert_perform_single_child_layout(child_clamp);
+    // Use minimal size when parent constraints are unbounded
+    if self.scroll_dir != Scrollable::X && clamp.max.height.is_infinite() {
+      child_size.height = clamp.min.height;
+    }
+    if self.scroll_dir != Scrollable::Y && clamp.max.width.is_infinite() {
+      child_size.width = clamp.min.width;
+    }
     let size = clamp.clamp(child_size);
     // The viewport needs to accurately record its real size, as widgets like
     // `padding` may increase the size without the viewport accounting for the
@@ -246,23 +273,6 @@ impl Render for Viewport {
     self.size.set(size);
 
     size
-  }
-
-  fn paint(&self, ctx: &mut PaintingCtx) {
-    let rect = Rect::from_size(self.size.get());
-    let path = if let Some(radius) = Provider::of::<Radius>(ctx) {
-      Path::rect_round(&rect, &radius)
-    } else {
-      Path::rect(&rect)
-    };
-
-    ctx.painter().clip(path.into());
-  }
-
-  fn visual_box(&self, ctx: &mut VisualCtx) -> Option<Rect> {
-    let clip_rect = Rect::from_size(self.size.get());
-    ctx.clip(clip_rect);
-    Some(clip_rect)
   }
 }
 

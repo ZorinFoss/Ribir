@@ -6,7 +6,6 @@ use crate::{
   prelude::ProviderCtx,
   widget::{BoxClamp, VisualBox, WidgetTree},
   widget_tree::WidgetId,
-  window::DelayEvent,
 };
 
 /// A place to compute the render object's layout.
@@ -20,6 +19,7 @@ pub struct LayoutCtx<'a> {
   /// `LayoutCtx` always in a mutable borrow.
   pub(crate) tree: &'a mut WidgetTree,
   pub(crate) provider_ctx: ProviderCtx,
+  pub(crate) laid_out_queue: &'a mut Vec<WidgetId>,
 }
 
 impl<'a> WidgetCtxImpl for LayoutCtx<'a> {
@@ -31,40 +31,44 @@ impl<'a> WidgetCtxImpl for LayoutCtx<'a> {
 }
 
 impl<'a> LayoutCtx<'a> {
-  pub(crate) fn new(id: WidgetId, tree: &'a mut WidgetTree) -> Self {
+  pub(crate) fn new(
+    id: WidgetId, tree: &'a mut WidgetTree, laid_out_queue: &'a mut Vec<WidgetId>,
+  ) -> Self {
     let provider_ctx = if let Some(p) = id.parent(tree) {
       ProviderCtx::collect_from(p, tree)
     } else {
       ProviderCtx::default()
     };
-    Self { id, tree, provider_ctx }
+    Self { id, tree, provider_ctx, laid_out_queue }
   }
 
   /// Perform layout of the widget of the context and return its size.
   pub(crate) fn perform_layout(&mut self, clamp: BoxClamp) -> Size {
-    // Safety: the `tree` just use to get the widget of `id`, and `tree2` not drop
-    // or modify it during perform layout.
-    let tree2 = unsafe { &*(self.tree as *mut WidgetTree) };
-
-    let id = self.id();
-
-    debug_assert!(clamp.min.is_finite());
-    let size = id.assert_get(tree2).perform_layout(clamp, self);
-    debug_assert!(size.is_finite());
-    let info = self.tree.store.layout_info_or_default(id);
-    info.clamp = clamp;
-    info.size = Some(size);
-
-    {
-      VisualCtx::from_layout_ctx(self).update_visual_box();
-    }
-
-    self.provider_ctx.pop_providers_for(self.id());
     self
-      .window()
-      .add_delay_event(DelayEvent::PerformedLayout(id));
+      .get_calculated_size(self.id, clamp)
+      .unwrap_or_else(|| {
+        // Safety: the `tree` just use to get the widget of `id`, and `tree2` not drop
+        // or modify it during perform layout.
+        let tree2 = unsafe { &*(self.tree as *mut WidgetTree) };
 
-    size
+        let id = self.id();
+
+        debug_assert!(clamp.min.is_finite());
+        let size = id.assert_get(tree2).perform_layout(clamp, self);
+        debug_assert!(size.is_finite());
+        let info = self.tree.store.layout_info_or_default(id);
+        info.clamp = clamp;
+        info.size = Some(size);
+
+        {
+          VisualCtx::from_layout_ctx(self).update_visual_box();
+        }
+
+        self.provider_ctx.pop_providers_for(id);
+        self.laid_out_queue.push(id);
+
+        size
+      })
   }
 
   /// Perform layout of the `child` and return its size.

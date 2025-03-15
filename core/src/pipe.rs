@@ -769,8 +769,6 @@ impl PipeNode {
     unsafe { &mut *self.0.get() }
   }
 
-  pub(crate) fn host_render(&self) -> &mut Box<dyn RenderQueryable> { &mut self.as_mut().data }
-
   /// Attach a subscription to host widget of the `PipeNode`, and the
   /// subscription will be unsubscribed when the `PipeNode` dropped.
   fn attach_subscription(self, u: impl Subscription + 'static) {
@@ -868,6 +866,8 @@ impl Render for PipeNode {
   }
 
   fn get_transform(&self) -> Option<Transform> { self.as_ref().data.get_transform() }
+
+  fn dirty_phase(&self) -> DirtyPhase { self.as_ref().data.dirty_phase() }
 }
 
 #[derive(Clone)]
@@ -993,7 +993,8 @@ mod tests {
     };
     let wnd = TestWindow::new(w);
     let tree = wnd.tree_mut();
-    tree.layout(Size::zero());
+    let mut queue = vec![];
+    tree.layout(Size::zero(), &mut queue);
     let ids = tree
       .content_root()
       .descendants(tree)
@@ -1002,7 +1003,8 @@ mod tests {
     {
       *c_size.write() = Size::new(1., 1.);
     }
-    tree.layout(Size::zero());
+    let mut queue = vec![];
+    tree.layout(Size::zero(), &mut queue);
     let new_ids = tree
       .content_root()
       .descendants(tree)
@@ -1030,7 +1032,8 @@ mod tests {
     };
     let wnd = TestWindow::new(w);
     let tree = wnd.tree_mut();
-    tree.layout(Size::zero());
+    let mut queue = vec![];
+    tree.layout(Size::zero(), &mut queue);
     let ids = tree
       .content_root()
       .descendants(tree)
@@ -1039,7 +1042,8 @@ mod tests {
     {
       *c_size.write() = Size::new(1., 1.);
     }
-    tree.layout(Size::zero());
+    let mut queue = vec![];
+    tree.layout(Size::zero(), &mut queue);
     let new_ids = tree
       .content_root()
       .descendants(tree)
