@@ -16,7 +16,15 @@ pub fn init(classes: &mut Classes) {
     MD_ACTIVE_HEADER,
   }
 
-  classes.insert(TAB_HEADERS_VIEW, empty_cls);
+  classes.insert(
+    TAB_HEADERS_VIEW,
+    style_class! {
+      h_align: tab_pos_var()
+        .map(|pos| if pos.is_horizontal() { HAlign::Stretch } else { HAlign::Left }),
+      v_align: tab_pos_var()
+        .map(|pos| if !pos.is_horizontal() { VAlign::Stretch } else { VAlign::Top }),
+    },
+  );
   classes.insert(TAB_HEADERS_CONTAINER, |w| {
     stack! {
       providers: providers(),
@@ -41,7 +49,7 @@ pub fn init(classes: &mut Classes) {
         }
       },
       @{ w }
-      @in_parent_layout! { @ { tab_pos_var().map(indicator) } }
+      @in_parent_layout! { @ { tab_pos_var().map(|pos| fn_widget!{ @ { indicator(pos) }}) } }
     }
     .into_widget()
   });
@@ -60,20 +68,24 @@ pub fn init(classes: &mut Classes) {
   );
 
   classes.insert(TAB_HEADER, |w| {
+    let w = class! {
+      clamp: header_clamp(),
+      class: is_active_header().map(move |active| {
+        if active { MD_ACTIVE_HEADER } else { MD_INACTIVE_HEADER }
+      }),
+      cursor: CursorIcon::Pointer,
+      foreground: foreground_color(),
+      @{ w }
+    };
+
+    if DisabledRipple::get(BuildCtx::get()) {
+      return w.into_widget();
+    }
+
     let hover_layer = HoverLayer::tracked(LayerArea::WidgetCover(Radius::default()));
     ripple! {
       bounded: RippleBound::Radius(Radius::default()),
-      cursor: CursorIcon::Pointer,
-      foreground: foreground_color(),
-      @ $hover_layer {
-        clamp: header_clamp(),
-        @Class {
-          class: is_active_header().map(move |active| {
-            if active { MD_ACTIVE_HEADER } else { MD_INACTIVE_HEADER }
-          }),
-          @{ w }
-        }
-      }
+      @ $hover_layer { @{ w } }
     }
     .into_widget()
   });

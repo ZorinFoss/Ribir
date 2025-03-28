@@ -17,15 +17,15 @@ impl Compose for Todos {
           @Tabs {
             h_align: HAlign::Stretch,
             @Tab {
-              label: "All",
-              @ task_lists(this.clone_writer(), |_| true)
+              @ { "All" }
+              @task_lists(this.clone_writer(), |_| true)
             }
             @Tab {
-              label: "ACTIVE",
-              @ task_lists(this.clone_writer(), |t| !t.complete )
+              @ { "ACTIVE" }
+              @task_lists(this.clone_writer(), |t| !t.complete )
             }
             @Tab {
-              label: "DONE",
+              @ { "DONE" }
               @task_lists(this, |t| t.complete )
             }
           }
@@ -50,7 +50,7 @@ fn task_lists(
     @Scrollbar {
       on_mounted: move |_| c_stagger.run(),
       @ {
-        pipe!($this;).map(move |_| {
+        pipe!($this;).map(move |_| fn_widget!{
           let _hint_capture_this = || $this.write();
           let mut widgets = vec![];
 
@@ -63,7 +63,7 @@ fn task_lists(
               );
               let item = pipe!(*$editing == Some(id))
                 .value_chain(|s| s.distinct_until_changed().box_it())
-                .map(move |b|{
+                .map(move |b| fn_widget!{
                   if b {
                     @Container {
                       size: Size::new(f32::INFINITY, 64.),

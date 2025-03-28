@@ -46,6 +46,14 @@ impl BoxClamp {
 
   pub const fn max_size(max: Size) -> Self { Self { min: ZERO_SIZE, max } }
 
+  pub const fn max_height(height: f32) -> Self {
+    Self { min: ZERO_SIZE, max: Size::new(f32::INFINITY, height) }
+  }
+
+  pub const fn max_width(width: f32) -> Self {
+    Self { min: ZERO_SIZE, max: Size::new(width, f32::INFINITY) }
+  }
+
   pub fn with_min_size(mut self, size: Size) -> Self {
     self.min = size.min(self.max);
     self
@@ -276,10 +284,15 @@ mod tests {
         on_performed_layout: move |_| *$w_layout_cnt.write() += 1,
         @ {
           pipe!($child_box.size.is_empty())
-            .map(move|b| if b {
-                MockBox { size: Size::new(1., 1.) }.into_widget()
-              } else {
-                child_box.clone_writer().into_widget()
+            .map(move|b| {
+              let child_box = child_box.clone_writer();
+              fn_widget! {
+                if b {
+                  MockBox { size: Size::new(1., 1.) }.into_widget()
+                } else {
+                  child_box.into_widget()
+                }
+              }
             })
         }
       }

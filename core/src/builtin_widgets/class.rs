@@ -59,14 +59,62 @@ macro_rules! style_class {
   };
 }
 
-/// The macro is used to create a class implementation with a specified name
-/// while accepting declarations of the built-in widget fields.
+/// This macro generates a function for creating a styled widget with predefined
+/// fields. It simplifies the process of applying consistent styles to widgets.
+///
+/// # Usage
+/// ```rust
+/// use ribir::prelude::*;
+///
+/// named_style_impl!(primary_button => {
+///   padding: EdgeInsets::all(8.),
+///   background: Color::BLUE,
+/// });
+/// ```
 #[macro_export]
-macro_rules! named_style_class {
-  ($name: ident => { $($field: ident: $value: expr),* $(,)? }) => {
-    fn $name(widget: $crate::prelude::Widget) -> $crate::prelude::Widget {
-      $crate::prelude::FatObj::new(widget) $(.$field($value))* .into_widget()
+macro_rules! named_style_impl {
+  ($(#[$meta:meta])* $style_name:ident => {
+      $($field:ident: $value:expr),* $(,)?
+  }) => {
+    $(#[$meta])*
+    fn $style_name(widget: $crate::prelude::Widget) -> $crate::prelude::Widget {
+      $crate::prelude::FatObj::new(widget)
+        $(.$field($value))*
+        .into_widget()
     }
+  };
+}
+
+/// This macro generates multiple styled widget builder functions in one go.
+/// It helps in defining several styles simultaneously, reducing repetition.
+///
+/// # Example
+/// ```
+/// use ribir::prelude::*;
+///
+/// named_styles_impl! {
+///   /// Secondary button style for auxiliary actions
+///   secondary_button => {
+///       padding: EdgeInsets::all(6.),
+///       background: Color::GRAY,
+///   },
+///
+///   /// Danger button style for destructive operations
+///   danger_button => {
+///       padding: EdgeInsets::all(8.),
+///       background: Color::RED,
+///   }
+/// }
+/// ```
+#[macro_export]
+macro_rules! named_styles_impl {
+  ($( $(#[$meta:meta])* $name:ident => { $($field:ident: $value:expr),* $(,)? } ),* $(,)? ) => {
+    $(
+      named_style_impl! {
+        $(#[$meta])*
+        $name => { $($field: $value),* }
+      }
+    )*
   };
 }
 
@@ -351,6 +399,11 @@ fn class_update(node: &ClassNode, orig: &ClassNode, class: &Class, wnd_id: Windo
   let new_id = ctx.build(class.apply_style(Widget::from_id(orig_id)));
 
   let tree = ctx.tree_mut();
+
+  if child_id != new_id {
+    // update the DynamicWidgetId out of the class node when id changed.
+    class_node.update_track_id(new_id);
+  }
 
   new_id.wrap_node(tree, |render| {
     node.replace_data(render);
@@ -639,7 +692,7 @@ mod tests {
       @Providers {
         providers: smallvec![initd_classes().into_provider()],
         @ {
-          let w = pipe!(*$w_trigger).map(|_|{
+          let w = pipe!(*$w_trigger).map(|_| fn_widget!{
             @Container {size: Size::new(100., 100.) }
           });
           @Class {
@@ -780,5 +833,47 @@ mod tests {
     *w_inner.write() = true;
     wnd.draw_frame();
     assert_eq!(*inner_apply.read(), 3);
+  }
+
+  // the track_id is bind after the class, when the class is changed and wrap with
+  // new reader(here is the margin), the track_id should changed.
+  #[test]
+  fn fix_track_id_in_class_node() {
+    reset_test_env!();
+
+    class_names! { WRAP_CLS, IDENTITY_CLS };
+
+    let (r_cls, w_cls) = split_value(IDENTITY_CLS);
+    let (r_id, w_id) = split_value(None);
+    let w = fn_widget! {
+      let cls = Class::provider(WRAP_CLS, style_class!(
+        margin: EdgeInsets::all(2.),
+      ));
+
+      let mut w = FatObj::new(
+        @Void {
+          class: pipe!(*$r_cls),
+        }.into_widget()
+      );
+      *$w_id.write() = Some($w.track_id());
+
+      @Providers{
+        providers: smallvec![
+          cls,
+        ],
+        @ { w }
+      }
+    };
+
+    let mut wnd = TestWindow::new(w);
+    wnd.draw_frame();
+    let id1 = r_id.read().as_ref().and_then(|w| w.get());
+
+    *w_cls.write() = WRAP_CLS;
+    wnd.draw_frame();
+
+    let id2 = r_id.read().as_ref().and_then(|w| w.get());
+    assert!(id1 != id2);
+    assert!(!id2.unwrap().is_dropped(wnd.tree()));
   }
 }

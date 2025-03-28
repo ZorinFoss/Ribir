@@ -1,6 +1,6 @@
 use ribir_painter::color::ColorFilterMatrix;
 
-use crate::prelude::*;
+use crate::{prelude::*, wrap_render::WrapRender};
 
 /// GRAYSCALE_FILTER
 ///
@@ -29,6 +29,48 @@ pub const LUMINANCE_TO_ALPHA_FILTER: ColorFilterMatrix = ColorFilterMatrix {
   base_color: None,
 };
 
+/// saturate_filter
+///
+/// Creates a color filter that changes the saturation of an element's color
+/// palette, altering its overall color tone.
+/// Parameters:
+///   - level: The saturation_level parameter accepts values between 0.0 and 1.0 (float).
+///       - Values < 0.5 desaturate colors (grayscale effect).
+///       - Values > 0.5 saturate colors (vibrant effect).
+///       - saturation_level = 1.0 maintains original saturation.
+#[rustfmt::skip]
+pub fn saturate_filter(level: f32) -> ColorFilterMatrix {
+  ColorFilterMatrix {
+    matrix: [
+      0.213 + 0.787 * level, 0.715 - 0.715 * level, 0.072 - 0.072 * level, 0.,  // red
+      0.213 - 0.213 * level, 0.715 + 0.285 * level, 0.072 - 0.072 * level, 0.,  // green
+      0.213 - 0.213 * level, 0.715 - 0.715 * level, 0.072 + 0.928 * level, 0.,  // blue
+      0., 0., 0., 1.,  //alpha
+    ],
+    base_color: None,
+  }
+}
+
+/// hue_rotate_filter
+///
+/// Creates a color filter that rotates the hue of an element's color palette by
+/// a specified angle, altering its overall color tone.
+/// Parameters:
+///   - rad: Value in radians (deg), positive values rotate clockwise, negative
+///     values rotate counterclockwise.
+#[rustfmt::skip]
+pub fn hue_rotate_filter(rad: f32) -> ColorFilterMatrix {
+  ColorFilterMatrix {
+    matrix: [
+      0.213 + rad.cos() * 0.787 - rad.sin() * 0.213, 0.715 - rad.cos() * 0.715 - rad.sin() * 0.715, 0.072 - rad.cos() * 0.072 + rad.sin() * 0.928, 0.,
+      0.213 - rad.cos() * 0.213 + rad.sin() * 0.143, 0.715 + rad.cos() * 0.285 + rad.sin() * 0.14,  0.072 - rad.cos() * 0.072 - rad.sin() * 0.283, 0.,
+      0.213 - rad.cos() * 0.213 - rad.sin() * 0.787, 0.715 - rad.cos() * 0.715 + rad.sin() * 0.715, 0.072 + rad.cos() * 0.928 + rad.sin() * 0.072, 0.,
+      0.,0.,0.,1.,
+    ],
+    base_color: None 
+  }
+}
+
 /// INVERT_FILTER
 ///
 /// INVERT_FILTER will invert the color value of each pixel in an image, that
@@ -45,17 +87,22 @@ pub const INVERT_FILTER: ColorFilterMatrix = ColorFilterMatrix {
 };
 
 /// This widget applies a [`ColorFilterMatrix`] to the child widget.
-#[derive(Declare, SingleChild)]
+#[derive(Declare)]
 pub struct ColorFilter {
   pub filter: ColorFilterMatrix,
 }
 
-impl Render for ColorFilter {
-  fn perform_layout(&self, clamp: BoxClamp, ctx: &mut LayoutCtx) -> Size {
-    ctx.assert_perform_single_child_layout(clamp)
+impl_compose_child_for_wrap_render!(ColorFilter, DirtyPhase::Paint);
+
+impl WrapRender for ColorFilter {
+  fn perform_layout(&self, clamp: BoxClamp, host: &dyn Render, ctx: &mut LayoutCtx) -> Size {
+    host.perform_layout(clamp, ctx)
   }
 
-  fn paint(&self, ctx: &mut PaintingCtx) { ctx.painter().apply_color_matrix(self.filter); }
+  fn paint(&self, host: &dyn Render, ctx: &mut PaintingCtx) {
+    ctx.painter().apply_color_matrix(self.filter);
+    host.paint(ctx);
+  }
 }
 
 #[cfg(not(target_arch = "wasm32"))]

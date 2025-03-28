@@ -184,7 +184,7 @@ Then, add the following code to `ui.rs` to describe `Todos` as a widget:
 use ribir::prelude::*;
 
 impl Compose for Todos {
-  fn compose(this: impl StateWriter<Value = Self>) -> impl IntoWidgetStrict<FN> {
+  fn compose(this: impl StateWriter<Value = Self>) -> impl IntoWidget<FN> {
     fn_widget! {
       @Column {
         align_items: Align::Center,
@@ -203,15 +203,15 @@ Next, we'll add an empty task tabs to the `Column` to set up our entire structur
 ```rust ignore
 @Tabs {
   @Tab {
-    label: "ALL",
+    @{ "ALL" }
     @text! { text: text: "Coming Soon!" }
   }
   @Tab {
-    label: "ACTIVE",
+    @{ "ACTIVE" }
     @text! { text: text: "Coming Soon!" }
   }
   @Tab {
-    label: "DONE",
+    @{ "DONE" }
     @text! { text: "Coming Soon!" }
   }
 }
@@ -329,7 +329,7 @@ Next, let's look at the implementation of `task_item`:
 
 ...
 
-fn task_item<S>(task: S) -> impl IntoWidgetStrict<FN>
+fn task_item<S>(task: S) -> impl IntoWidget<FN>
 where
   S: StateWriter<Value = Task> + 'static,
   S::OriginWriter: StateWriter<Value = Todos>,
@@ -373,17 +373,17 @@ Now, in the `compose` of `Todos`, replace the original "coming soon!" with `task
 
 @Tabs {
   @Tab {
-    label: "ALL",
+    @{ "ALL" }
     // new
     @task_lists(&this, |_| true)
   }
   @Tab {
-    label: "ACTIVE",
+    @{ "ACTIVE" }
     // new
     @task_lists(&this, |t| !t.complete )
   }
   @Tab {
-    label: "DONE",
+    @{ "DONE" }
     // new
     @task_lists(&this, |t| t.complete )
   }
@@ -570,7 +570,7 @@ use ribir::prelude::{svgs, *};
 use std::time::Duration;
 
 impl Compose for Todos {
-  fn compose(this: impl StateWriter<Value = Self>) -> impl IntoWidgetStrict<FN> {
+  fn compose(this: impl StateWriter<Value = Self>) -> impl IntoWidget<FN> {
     fn_widget! {
       @Column {
         align_items: Align::Center,
@@ -591,15 +591,15 @@ impl Compose for Todos {
         }
         @Tabs {
           @Tab {
-            label: "ALL",
+            @{ "ALL" }
             @task_lists(&this, |_| true)
           }
           @Tab {
-            label: "ACTIVE",
+            @{ "ACTIVE" }
             @task_lists(&this, |t| !t.complete )
           }
           @Tab {
-            label: "DONE",
+            @{ "DONE" }
             @task_lists(&this, |t| t.complete )
           }
         }
@@ -663,7 +663,7 @@ fn task_lists(this: &impl StateWriter<Value = Todos>, cond: fn(&Task) -> bool) -
   .into()
 }
 
-fn task_item<S>(task: S) -> impl IntoWidgetStrict<FN>
+fn task_item<S>(task: S) -> impl IntoWidget<FN>
 where
   S: StateWriter<Value = Task> + 'static,
   S::OriginWriter: StateWriter<Value = Todos>,

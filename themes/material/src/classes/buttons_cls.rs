@@ -1,4 +1,4 @@
-use ribir_core::{named_style_class, prelude::*};
+use ribir_core::{named_style_impl, prelude::*};
 use ribir_widgets::prelude::*;
 
 use crate::*;
@@ -12,13 +12,13 @@ pub(super) fn init(classes: &mut Classes) {
   fab_init(classes);
 }
 
-named_style_class!(common_btn => {
+named_style_impl!(common_btn => {
   padding: md::EDGES_HOR_16,
   text_style: btn_label_style(18.)
 });
-named_style_class!(common_btn_label => { padding: md::EDGES_HOR_8 });
-named_style_class!(common_icon_only => { text_line_height: 24. });
-named_style_class!(common_label_only => {
+named_style_impl!(common_btn_label => { padding: md::EDGES_HOR_8 });
+named_style_impl!(common_icon_only => { text_line_height: 24. });
+named_style_impl!(common_label_only => {
   padding: md::EDGES_HOR_24,
   text_style: btn_label_style(40.)
 });
@@ -205,11 +205,17 @@ fn btn_label_style(line_height: f32) -> TextStyle {
 }
 
 fn base_interactive(w: Widget, radius: Radius) -> Widget {
-  let hover_layer = HoverLayer::tracked(LayerArea::WidgetCover(radius));
-  ripple! {
-    bounded: RippleBound::Radius(radius),
-    cursor: CursorIcon::Pointer,
-    @ $hover_layer { @ { w } }
+  if DisabledRipple::get(BuildCtx::get()) {
+    FatObj::new(w)
+      .cursor(CursorIcon::Pointer)
+      .into_widget()
+  } else {
+    let hover_layer = HoverLayer::tracked(LayerArea::WidgetCover(radius));
+    ripple! {
+      bounded: RippleBound::Radius(radius),
+      cursor: CursorIcon::Pointer,
+      @ $hover_layer { @ { w } }
+    }
+    .into_widget()
   }
-  .into_widget()
 }

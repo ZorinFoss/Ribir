@@ -53,6 +53,9 @@ pub use svg::*;
 pub mod color_filter;
 pub use color_filter::*;
 
+pub mod disabled;
+pub use disabled::*;
+
 pub mod clip;
 pub use clip::*;
 pub mod clip_boundary;
@@ -150,6 +153,7 @@ pub struct FatObj<T> {
   keep_alive: Option<State<KeepAlive>>,
   keep_alive_unsubscribe_handle: Option<Box<dyn Any>>,
   tooltips: Option<State<Tooltips>>,
+  disabled: Option<State<Disabled>>,
   clip_boundary: Option<State<ClipBoundary>>,
   providers: Option<SmallVec<[Provider; 1]>>,
 }
@@ -200,6 +204,7 @@ impl<T> FatObj<T> {
       opacity: self.opacity,
       tooltips: self.tooltips,
       clip_boundary: self.clip_boundary,
+      disabled: self.disabled,
       keep_alive: self.keep_alive,
       keep_alive_unsubscribe_handle: self.keep_alive_unsubscribe_handle,
       providers: self.providers,
@@ -234,6 +239,7 @@ impl<T> FatObj<T> {
       && self.opacity.is_none()
       && self.keep_alive.is_none()
       && self.tooltips.is_none()
+      && self.disabled.is_none()
       && self.clip_boundary.is_none()
   }
 
@@ -475,6 +481,14 @@ impl<T> FatObj<T> {
   pub fn get_tooltips_widget(&mut self) -> &State<Tooltips> {
     self
       .tooltips
+      .get_or_insert_with(|| State::value(<_>::default()))
+  }
+
+  /// Returns the `State<Disabled>` widget from the FatObj. If it doesn't
+  /// exist, a new one is created.
+  pub fn get_disabled_widget(&mut self) -> &State<Disabled> {
+    self
+      .disabled
       .get_or_insert_with(|| State::value(<_>::default()))
   }
 
@@ -950,6 +964,11 @@ impl<T> FatObj<T> {
     self.declare_builtin_init(v, Self::get_tooltips_widget, |m, v| m.tooltips = v)
   }
 
+  /// Initializes the disabled state of the widget.
+  pub fn disabled<const M: usize>(self, v: impl DeclareInto<bool, M>) -> Self {
+    self.declare_builtin_init(v, Self::get_disabled_widget, |m, v| m.disabled = v)
+  }
+
   /// Initializes the clip_boundary of the widget.
   pub fn clip_boundary<const M: usize>(self, v: impl DeclareInto<bool, M>) -> Self {
     self.declare_builtin_init(v, Self::get_clip_boundary_widget, |m, v| m.clip_boundary = v)
@@ -1029,11 +1048,11 @@ impl FatDeclarerExtend for () {
   fn finish(this: FatObj<()>) -> FatObj<()> { this }
 }
 
-impl<'w, T, const M: usize> IntoWidgetStrict<'w, M> for FatObj<T>
+impl<'w, T, const M: usize> IntoWidget<'w, M> for FatObj<T>
 where
   T: IntoWidget<'w, M>,
 {
-  fn into_widget_strict(self) -> Widget<'w> { self.map(|w| w.into_widget()).compose() }
+  fn into_widget(self) -> Widget<'w> { self.map(|w| w.into_widget()).compose() }
 }
 
 impl<'a> FatObj<Widget<'a>> {
@@ -1097,6 +1116,7 @@ impl<'a> FatObj<Widget<'a>> {
           transform,
           opacity,
           visibility,
+          disabled,
           h_align,
           v_align,
           relative_anchor,
@@ -1161,11 +1181,11 @@ impl<T> DeclarerWithSubscription<T> {
   }
 }
 
-impl<'w, T, const M: usize> IntoWidgetStrict<'w, M> for DeclarerWithSubscription<T>
+impl<'w, T, const M: usize> IntoWidget<'w, M> for DeclarerWithSubscription<T>
 where
   T: IntoWidget<'w, M>,
 {
-  fn into_widget_strict(self) -> Widget<'w> {
+  fn into_widget(self) -> Widget<'w> {
     let DeclarerWithSubscription { inner: host, subscribes } = self;
     let w = host.into_widget();
     if subscribes.is_empty() {

@@ -25,12 +25,32 @@ Please only add new entries below the [Unreleased](#unreleased---releasedate) he
 
 ## [@Unreleased] - @ReleaseDate
 
+### Breaking
+
+- **core**: PipeWidget will be lazy created by pipe value of FnWidget.(#723 @wjian23)
+
+## [0.4.0-alpha.30] - 2025-03-26
+
+### Features
+
+- **theme**: Added support for the Material Theme using the `DisabledRipple` provider to disable the ripple effect. (#722 by @M-Adoo)
+- **widgets**: Added `defer_alloc` to `Expanded` widget, allowing space allocation to be deferred until after other widgets are allocated. (#722 @M-Adoo)
+
+### Fixed
+
+- **macros**: Fixed `part_xxx!` macro handling of built-in widget state when used as a top-level macro. (#722 @M-Adoo)
+
+## [0.4.0-alpha.29] - 2025-03-19
+
+
 ### Features
 
 - **core**: record the visual rect after layout.(#698 @wjian23)
 - **widget**: Add the Widget of Menu.(#702 @wjian23)
 - **widgets**: Allow children of the `Stack` to adjust their size based on the `Stack`'s size. (#706 @M-Adoo)
 - **core**: Add support for ColorFilter.(#709 @wjian23)
+- **core**: Added builtin field `disable`.(#712 @wjian23)
+- **core**: Added ColorFilter of `hue_rotate_filter` and `saturate_filter`(#712 @wjian23)
 
 ### Fixed
 
@@ -38,17 +58,19 @@ Please only add new entries below the [Unreleased](#unreleased---releasedate) he
 - **core**: Fixed the panic when overlay recreate provider_ctx during event callback.(#702 @wjian23)
 - **core**: fix miss pop providers when call `push_providers_for` separately during layout.(#698 @wjian23)
 - **core**: enables embedding declare template as child in widget with Vec of template(#704 @wjian23)
-- **core**: Ensure layout event is emitted once per layout phase (not per frame) (PR #709 by @M-Adoo)
-- **core**: Use minimum constraint size for viewport in unbounded layouts (PR #709 by @M-Adoo)
-- **painter**: Properly discard render operations when clipping to zero-sized rectangles (#709 @M-Adoo)
+- **core**: Ensure layout event is emitted once per layout phase (not per frame) (#708 by @M-Adoo)
+- **core**: Use minimum constraint size for viewport in unbounded layouts (#708 by @M-Adoo)
+- **painter**: Properly discard render operations when clipping to zero-sized rectangles (#708 @M-Adoo)
 - **macro**: Fixed issue where top-level `fn_widget!` macro did not capture a built-in widget. (#706 @M-Adoo)
 - **widgets**: `Flex` now stretches cross-axis items using final line dimensions instead of constraint clamping. (#707 by @M-Adoo)
-
+- **core**: Fixed track_id in class node not update.(#712 @wjian23)
+- **core**: Fixed FocusScope not work when host changed by class or pipe.(#712@wjian23)
 
 ### Changed
 
 - **widgets**: Refactor `Divider` Widget. (#702 @wjian23)
 - **widgets**: Refactor `Tabs` Widget. (#707 @M-Adoo)
+- **widgets**: Refactor `Avatar` Widget. (#714 @M-Adoo)
 - **ci**: update rust version of ci to 2025-03-06 (#702 @wjian23)
 
 ### Breaking
@@ -688,7 +710,9 @@ We are very happy to share it with you. We hope you can try it out and give us f
 - **get started**: add the `get_started` series of tutorials to help users get started with Ribir.
 
 <!-- next-url -->
-[@Unreleased]: https://github.com/RibirX/Ribir/compare/ribir-v0.4.0-alpha.27...HEAD
+[@Unreleased]: https://github.com/RibirX/Ribir/compare/ribir-v0.4.0-alpha.30...HEAD
+[0.4.0-alpha.30]: https://github.com/RibirX/Ribir/compare/ribir-v0.4.0-alpha.29...ribir-v0.4.0-alpha.30
+[0.4.0-alpha.29]: https://github.com/RibirX/Ribir/compare/ribir-v0.4.0-alpha.27...ribir-v0.4.0-alpha.29
 [0.4.0-alpha.27]: https://github.com/RibirX/Ribir/compare/ribir-v0.4.0-alpha.26...ribir-v0.4.0-alpha.27
 [0.4.0-alpha.26]: https://github.com/RibirX/Ribir/compare/ribir-v0.4.0-alpha.25...ribir-v0.4.0-alpha.26
 [0.4.0-alpha.25]: https://github.com/RibirX/Ribir/compare/ribir-v0.4.0-alpha.24...ribir-v0.4.0-alpha.25

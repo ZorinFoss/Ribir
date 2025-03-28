@@ -72,8 +72,8 @@ impl Compose for MessageList {
             h_align: HAlign::Stretch,
             providers: [Provider::new(TabPos::Bottom)],
             @Tab {
-              label: "Messages",
-              icon: @Icon { @{ material_svgs::SMS } },
+              @ { "Messages" }
+              @Icon { @{ material_svgs::SMS } }
               @fn_widget! {
                 @Scrollbar {
                   @Lists {
@@ -84,9 +84,7 @@ impl Compose for MessageList {
                             line_number: 1usize,
                             @HeadlineText(Label::new(message.nick_name.clone()))
                             @SupportingText(Label::new(message.content.clone()))
-                            @Leading::new(
-                              EdgeWidget::Avatar(@Avatar { @{ message.img.clone() } })
-                            )
+                            @Leading::new(EdgeWidget::Avatar(@Avatar { @{ message.img.clone() }}))
                             @Trailing::new(EdgeWidget::Icon(svgs::MORE_HORIZ.into_widget()))
                           }
                           @Divider {}
@@ -100,8 +98,8 @@ impl Compose for MessageList {
               }
             }
             @Tab {
-              label: "Person",
-              icon: @Icon { @{ material_svgs::ACCOUNT_CIRCLE } },
+              @ { "Person" }
+              @Icon { @{ material_svgs::ACCOUNT_CIRCLE } }
               @fn_widget!(@Text { text: "Person" })
             }
           }
