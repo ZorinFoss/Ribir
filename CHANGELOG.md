@@ -25,9 +25,24 @@ Please only add new entries below the [Unreleased](#unreleased---releasedate) he
 
 ## [@Unreleased] - @ReleaseDate
 
+## [0.4.0-alpha.31] - 2025-04-02
+
+### Features
+
+- **core**: Introduced the `PairOf` utility to preserve parent and child type information of `ComposeChild`. (#724 @M-Adoo)
+- **core**: Added `class_array!` macro to apply multiple classes at once. (#724 by @M-Adoo)
+- **core**: Add non-child field support to `Template`. (#725 @M-Adoo)
+  - Support default values for non-child fields via `#[template(field)]` attribute.
+  - Maintain backward compatibility with existing child-focused patterns
+
+
 ### Breaking
 
 - **core**: PipeWidget will be lazy created by pipe value of FnWidget.(#723 @wjian23)
+- **core**: Changed `Declare` to initialize fields in-place rather than returning a new object (#724 by @M-Adoo)
+- **core**: The fn_widget! macro preserves the type information of the returned widget. (#726 @wjian23)
+- **core**: Refactor KeyWidget, reuse the instance with same key when Pipe regenerate. (#726 @wjian23)
+
 
 ## [0.4.0-alpha.30] - 2025-03-26
 
@@ -710,7 +725,8 @@ We are very happy to share it with you. We hope you can try it out and give us f
 - **get started**: add the `get_started` series of tutorials to help users get started with Ribir.
 
 <!-- next-url -->
-[@Unreleased]: https://github.com/RibirX/Ribir/compare/ribir-v0.4.0-alpha.30...HEAD
+[@Unreleased]: https://github.com/RibirX/Ribir/compare/ribir-v0.4.0-alpha.31...HEAD
+[0.4.0-alpha.31]: https://github.com/RibirX/Ribir/compare/ribir-v0.4.0-alpha.30...ribir-v0.4.0-alpha.31
 [0.4.0-alpha.30]: https://github.com/RibirX/Ribir/compare/ribir-v0.4.0-alpha.29...ribir-v0.4.0-alpha.30
 [0.4.0-alpha.29]: https://github.com/RibirX/Ribir/compare/ribir-v0.4.0-alpha.27...ribir-v0.4.0-alpha.29
 [0.4.0-alpha.27]: https://github.com/RibirX/Ribir/compare/ribir-v0.4.0-alpha.26...ribir-v0.4.0-alpha.27

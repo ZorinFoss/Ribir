@@ -54,7 +54,9 @@ pub struct Classes {
 macro_rules! style_class {
 ($($field: ident: $value: expr),* $(,)?) => {
     (move |widget: $crate::prelude::Widget| {
-      $crate::prelude::FatObj::new(widget) $(.$field($value))* .into_widget()
+      let mut fat_ಠ_ಠ = $crate::prelude::FatObj::new(widget);
+      $(fat_ಠ_ಠ.$field($value);)*
+      fat_ಠ_ಠ.into_widget()
     }) as $crate::prelude::ClassImpl
   };
 }
@@ -78,9 +80,9 @@ macro_rules! named_style_impl {
   }) => {
     $(#[$meta])*
     fn $style_name(widget: $crate::prelude::Widget) -> $crate::prelude::Widget {
-      $crate::prelude::FatObj::new(widget)
-        $(.$field($value))*
-        .into_widget()
+      let mut fat_ಠ_ಠ = $crate::prelude::FatObj::new(widget);
+      fat_ಠ_ಠ$(.$field($value))*;
+      fat_ಠ_ಠ.into_widget()
     }
   };
 }
@@ -118,16 +120,50 @@ macro_rules! named_styles_impl {
   };
 }
 
-/// This macro is used to define a class implementation by combining multiple
-/// other class implementations.
+/// Combines multiple class implementations into a single implementation.
+/// This macro takes a list of class implementations and returns a closure
+/// that applies each implementation sequentially to a `Widget`.
 #[macro_export]
-macro_rules! multi_class {
+macro_rules! class_multi_impl {
   ($($class: expr),*) => {
     move |mut w: Widget| {
       $(w = $class(w);)*
       w
     }
   };
+}
+
+/// Creates a vector of class names from a list of class expressions. The
+/// resulting array can be used to apply multiple classes to a widget. The last
+/// class in the list will be applied first, as it is closest to the widget.
+///
+/// # Example
+/// ```
+/// use ribir::prelude::*;
+///
+/// class_names!(RED_BORDER, BLUE_BACKGROUND);
+///
+/// let two_classes = class_array!(RED_BORDER, BLUE_BACKGROUND);
+///
+/// let widget = fn_widget! {
+///   @ $two_classes {
+///     @Container {
+///       size: Size::new(100., 100.),
+///     }
+///   }
+/// };
+/// ```
+#[macro_export]
+macro_rules! class_array {
+  ($($class:expr),* $(,)?) => {{
+    [
+      $(
+        $crate::prelude::DeclareInit
+          ::<Option<$crate::prelude::ClassName>>
+          ::declare_from($class)
+      ),*
+    ]
+  }};
 }
 
 /// A empty class implementation that returns the input widget as is.
@@ -317,6 +353,27 @@ impl<'c> ComposeChild<'c> for Class {
       }
     };
     FnWidget::new(f).into_widget()
+  }
+}
+
+impl<'w, const M: usize> ComposeChild<'w> for [DeclareInit<Option<ClassName>>; M] {
+  type Child = Widget<'w>;
+
+  fn compose_child(this: impl StateWriter<Value = Self>, mut widget: Self::Child) -> Widget<'w> {
+    let this = this
+      .try_into_value()
+      .unwrap_or_else(|_| panic!("Class array only supports stateless."));
+    for cls in this.into_iter().rev() {
+      widget = match cls {
+        DeclareInit::Value(class) => Class { class }.with_child(widget).into_widget(),
+        DeclareInit::Pipe(cls) => {
+          let mut widget = FatObj::new(widget);
+          widget.class(DeclareInit::Pipe(cls));
+          widget.into_widget()
+        }
+      };
+    }
+    widget
   }
 }
 
@@ -544,6 +601,26 @@ mod tests {
   }
 
   #[test]
+  fn class_array() {
+    reset_test_env!();
+
+    let mut wnd = TestWindow::new(fn_widget! {
+      let margin_and_clamp = class_array![MARGIN, CLAMP_50];
+      @Providers {
+        providers: smallvec![initd_classes().into_provider()],
+        @ $margin_and_clamp {
+          @Container {
+            size: Size::new(100., 100.),
+          }
+        }
+      }
+    });
+
+    wnd.draw_frame();
+    wnd.assert_root_size(Size::new(70., 70.));
+  }
+
+  #[test]
   fn fix_crash_for_class_impl_may_have_multi_child() {
     reset_test_env!();
 
@@ -761,10 +838,8 @@ mod tests {
     let (out, w_out) = split_value(EMPTY);
     let mut wnd = TestWindow::new(fn_widget! {
       let mut classes = Classes::default();
-      classes.insert(PIPE_CLS, |w| {
-        FatObj::new(w)
-          .class(Variant::<ClassName>::new(BuildCtx::get()).unwrap())
-          .into_widget()
+      classes.insert(PIPE_CLS, style_class!{
+        class: Variant::<ClassName>::new(BuildCtx::get()).unwrap()
       });
 
       let out = out.clone_watcher();
@@ -797,11 +872,8 @@ mod tests {
     let (inner, w_inner) = split_value(false);
     let (out, w_out) = split_value(false);
     let mut wnd = TestWindow::new(fn_widget! {
-      let out_cls = Class::provider(OUT_PIPE_CLS, |w| {
-        let inner_cls = Variant::<bool>::new(BuildCtx::get()).unwrap().map(|_| INNER_PIPE);
-        FatObj::new(w)
-          .class(inner_cls)
-          .into_widget()
+      let out_cls = Class::provider(OUT_PIPE_CLS, style_class!{
+        class: Variant::<bool>::new(BuildCtx::get()).unwrap().map(|_| INNER_PIPE)
       });
       let inner_cls = Class::provider(INNER_PIPE, |w| {
         *Provider::write_of::<usize>(BuildCtx::get()).unwrap() += 1;

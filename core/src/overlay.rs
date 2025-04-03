@@ -154,9 +154,9 @@ impl Overlay {
     }
     self.show_map(
       move |w| {
-        FatObj::new(w)
-          .anchor(Anchor::from_point(pos))
-          .into_widget()
+        let mut obj = FatObj::new(w);
+        obj.anchor(Anchor::from_point(pos));
+        obj.into_widget()
       },
       wnd,
     );
@@ -199,23 +199,23 @@ impl Overlay {
       let mut w = if background.is_some() || close_policy.contains(AutoClosePolicy::TAP_OUTSIDE) {
         let mut container = @Container { size: Size::splat(f32::INFINITY) };
         if let Some(background) = background.clone() {
-          container = container.background(background);
+          container.background(background);
         }
         if close_policy.contains(AutoClosePolicy::TAP_OUTSIDE) {
-          container = container.on_tap(move |e| {
+          container.on_tap(move |e| {
             if e.target() == e.current_target() {
               if let Some(overlay) = Overlay::of(&**e) {
                 overlay.close();
               }
             }
-          })
+          });
         }
         container.map(|c| c.with_child(w))
       } else {
         FatObj::new(w)
       };
       if close_policy.contains(AutoClosePolicy::ESC) {
-        w = w.on_key_down(move |e| {
+        w.on_key_down(move |e| {
           if *e.key() == VirtualKey::Named(NamedKey::Escape) {
             if let Some(overlay) = Overlay::of(&**e) {
               overlay.close();
@@ -231,14 +231,14 @@ impl Overlay {
     let this = self.clone();
     let _ = AppCtx::spawn_local(async move {
       let _guard = BuildCtx::init_for(wnd.tree().root(), wnd.tree);
-
-      let wid = BuildCtx::get_mut().build(gen());
+      let generator: GenWidget = gen.into();
+      let wid = BuildCtx::get_mut().build(generator.gen_widget());
       let tree = wnd.tree_mut();
       tree.root().append(wid, tree);
       wid.on_mounted_subtree(tree);
       tree.dirty_marker().mark(wid, DirtyPhase::Layout);
 
-      this.0.borrow_mut().showing = Some(ShowingInfo { generator: gen.into(), wnd_id: wnd.id() });
+      this.0.borrow_mut().showing = Some(ShowingInfo { generator, wnd_id: wnd.id() });
 
       let showing_overlays = Provider::of::<ShowingOverlays>(BuildCtx::get()).unwrap();
       showing_overlays.add(this);

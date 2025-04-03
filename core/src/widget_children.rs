@@ -64,8 +64,9 @@ pub trait MultiChild: IntoWidget<'static, RENDER> {
 ///   type Child = Widget<'c>;
 ///
 ///   fn compose_child(this: impl StateWriter<Value = Self>, child: Self::Child) -> Widget<'c> {
-///     let w = FatObj::new(child);
-///     w.background(Color::RED).into_widget()
+///     let mut w = FatObj::new(child);
+///     w.background(Color::RED);
+///     w.into_widget()
 ///   }
 /// }
 ///
@@ -156,6 +157,14 @@ pub trait MultiChild: IntoWidget<'static, RENDER> {
 pub trait ComposeChild<'c>: Sized {
   type Child: 'c;
   fn compose_child(this: impl StateWriter<Value = Self>, child: Self::Child) -> Widget<'c>;
+
+  /// Returns a builder for the child template.
+  fn child_template() -> <Self::Child as Template>::Builder
+  where
+    Self::Child: Template,
+  {
+    <Self::Child as Template>::builder()
+  }
 }
 
 /// The trait converts a type into a child of the `SingleChild`.
@@ -190,58 +199,105 @@ pub trait ComposeChildFrom<C, const M: usize> {
   fn compose_child_from(from: C) -> Self;
 }
 
-/// This trait signifies that a type can serve as a child of `ComposeChild`.
+/// Marker trait for types that can be used as children in composition
+/// hierarchies.
 ///
-/// Implementing this trait involves implementing `ComposeChildFrom` from this
-/// type to itself.
-///
-/// One can utilize `#[derive(ChildOfCompose)]` to implement this trait.
+/// This trait is typically implemented using `#[derive(ChildOfCompose)]`, which
+/// automatically generates the [`ComposeChildFrom`] implementation for `Self`.
 pub trait ChildOfCompose {}
 
-/// The template specifies the types of children that `ComposeChild` can have,
-/// gathering these children and providing them to the parent for composition.
+/// A type-safe template system for constructing valid widget composition
+/// hierarchies.
 ///
-/// You can use `#[derive(Template)]` to implement this trait for a struct or
-/// enum.
+/// Provides compile-time validation of widget structure through composition
+/// rules and type-driven child relationships. Templates serve as blueprint
+/// definitions that:
+/// - Define valid child configurations through type constraints
+/// - Enable automatic widget conversions via [`ComposeChildFrom`]
+/// - Support default value initialization for non-widget fields
 ///
-/// In a struct, children are collected from its fields, so the field types must
-/// be distinct and not convertible between each other using `ComposeChildFrom`.
+/// # Key Features
 ///
-/// In an enum, children are collected from its variants, so the variant types
-/// must also be distinct and not convertible between each other using
-/// `ComposeChildFrom`.
+/// - **Type-Checked Composition**: Enforces valid widget hierarchies at compile
+///   time
+/// - **Flexible Child Specification**: Supports both required and optional
+///   children
+/// - **Dual-Mode Definition**: Works with both structs (fixed layout) and enums
+///   (variant selection)
+/// - **Automatic Conversions**: Leverages Rust's type system for seamless child
+///   conversion
 ///
-/// # Example
+/// # Implementation Mechanics
 ///
+/// When derived via `#[derive(Template)]`, the system:
+/// 1. Generates a builder interface with type-checked composition methods
+/// 2. Enforces parent/child compatibility through trait bounds
+/// 3. Automatically applies default values to non-widget fields
+/// 4. Implements necessary conversion traits for child widgets
+///
+/// # Template Patterns
+///
+/// ## Basic Widget Composition
+/// ```rust
+/// use ribir::prelude::*;
+///
+/// #[derive(Declare)]
+/// struct MyButton;
+///
+/// // Defines valid child configurations for MyButton
+/// #[derive(Template)]
+/// struct ButtonChild<'w> {
+///   icon: Option<PairOf<'w, Icon>>, // Optional icon child
+///   label: Option<CowArc<str>>,     // Optional text label
+/// }
+///
+/// impl<'c> ComposeChild<'c> for MyButton {
+///   type Child = ButtonChild<'c>;
+///
+///   fn compose_child(this: impl StateWriter<Value = Self>, child: Self::Child) -> Widget<'c> {
+///     unimplemented!() // Actual composition logic
+///   }
+/// }
+///
+/// // Usage with text child (automatically converted to ButtonChild)
+/// let _btn = fn_widget! {
+///   @MyButton { @{ "Hi!" } }  // String converts to label via ComposeChildFrom
+/// };
+/// ```
+///
+/// ## Struct-Based Layout Definition
 /// ```rust
 /// use ribir::prelude::*;
 ///
 /// #[derive(Template)]
-/// struct MyTemplate<'w> {
-///   leading_icon: Leading<Widget<'w>>,
-///   trailing_icon: Option<Trailing<Widget<'w>>>,
+/// struct Toolbar<'w> {
+///   title: CowArc<str>,       // Mandatory text element
+///   menu: Option<Widget<'w>>, // Optional widget slot
+///   #[template(field = Color::BLUE)]
+///   theme: Color, // Non-widget field with default
 /// }
 /// ```
 ///
-/// This template outlines two child components for its parent: a mandatory
-/// `Leading<Widget>` and an optional `Trailing<Widget>`.
-///
+/// ## Enum-Based Variant Selection
 /// ```rust
 /// use ribir::prelude::*;
 ///
 /// #[derive(Template)]
-/// enum MyTemplate<'w> {
-///   Leading(Leading<Widget<'w>>),
-///   Trailing(Trailing<Widget<'w>>),
+/// enum ButtonContent<'w> {
+///   Icon(PairOf<'w, Icon>), // Icon-only variant
+///   Label(CowArc<str>),     // Text-only variant
+///   Both {
+///     // Combined variant
+///     icon: PairOf<'w, Icon>,
+///     label: CowArc<str>,
+///   },
 /// }
 /// ```
-///
-/// This template specifies one child for its parent, which must be either a
-/// leading icon or a trailing icon.
-///
-/// Refer to the [`ComposeChild`] documentation for further information.
 pub trait Template: Sized {
+  /// Type responsible for validating and constructing template instances
   type Builder: TemplateBuilder;
+
+  /// Creates a configured builder instance ready for composition
   fn builder() -> Self::Builder;
 }
 
@@ -259,9 +315,47 @@ pub struct Pair<W, C> {
   child: C,
 }
 
-/// A alias of `Pair<W, Widget>`, means `Widget` is the child of the generic
-/// type.
-pub type WidgetOf<'a, W> = Pair<W, Widget<'a>>;
+/// A pair used to store a `ComposeChild` widget and its child. This preserves
+/// the type information of both the parent and child without composition.
+pub struct PairOf<'c, W: ComposeChild<'c>>(FatObj<Pair<State<W>, <W as ComposeChild<'c>>::Child>>);
+
+pub trait TemplateFieldFrom<T, const M: usize> {
+  fn template_field_from(from: T) -> Self;
+}
+
+pub trait TemplateFieldInto<T, const M: usize> {
+  fn template_field_into(self) -> T;
+}
+
+impl<T, U> TemplateFieldFrom<U, 0> for T
+where
+  T: From<U>,
+{
+  fn template_field_from(from: U) -> Self { from.into() }
+}
+
+impl<T, U> TemplateFieldFrom<U, 1> for DeclareInit<T>
+where
+  DeclareInit<T>: DeclareFrom<U, 1>,
+  T: From<U>,
+{
+  fn template_field_from(from: U) -> Self { DeclareInit::declare_from(from) }
+}
+
+impl<T, U> TemplateFieldFrom<U, 2> for DeclareInit<T>
+where
+  DeclareInit<T>: DeclareFrom<U, 2>,
+  T: From<U>,
+{
+  fn template_field_from(from: U) -> Self { DeclareInit::declare_from(from) }
+}
+
+impl<T, U, const M: usize> TemplateFieldInto<U, M> for T
+where
+  U: TemplateFieldFrom<T, M>,
+{
+  fn template_field_into(self) -> U { U::template_field_from(self) }
+}
 
 impl IntoWidget<'static, RENDER> for Box<dyn MultiChild> {
   #[inline]
@@ -289,6 +383,56 @@ impl<W, C> Pair<W, C> {
   #[inline]
   pub fn parent(self) -> W { self.parent }
 }
+
+impl<'c, W: ComposeChild<'c>> PairOf<'c, W> {
+  pub fn parent(&self) -> &State<W> { &self.0.parent }
+}
+
+impl<'c, W> IntoWidget<'c, COMPOSE> for PairOf<'c, W>
+where
+  W: ComposeChild<'c> + 'static,
+{
+  #[inline]
+  fn into_widget(self) -> Widget<'c> { self.0.into_widget() }
+}
+
+impl<'c, W, C, const M: usize> ComposeChildFrom<Pair<W, C>, M> for PairOf<'c, W>
+where
+  W: ComposeChild<'c> + 'static,
+  C: IntoChildCompose<<W as ComposeChild<'c>>::Child, M>,
+{
+  fn compose_child_from(from: Pair<W, C>) -> Self {
+    let Pair { parent, child } = from;
+    Self(FatObj::new(Pair { parent: State::value(parent), child: child.into_child_compose() }))
+  }
+}
+
+impl<'c, W, C, const M: usize> ComposeChildFrom<Pair<State<W>, C>, M> for PairOf<'c, W>
+where
+  W: ComposeChild<'c> + 'static,
+  C: IntoChildCompose<<W as ComposeChild<'c>>::Child, M>,
+{
+  fn compose_child_from(from: Pair<State<W>, C>) -> Self {
+    let Pair { parent, child } = from;
+    Self(FatObj::new(Pair { parent, child: child.into_child_compose() }))
+  }
+}
+
+impl<'c, W, C, const M: usize> ComposeChildFrom<FatObj<Pair<State<W>, C>>, M> for PairOf<'c, W>
+where
+  W: ComposeChild<'c> + 'static,
+  C: IntoChildCompose<<W as ComposeChild<'c>>::Child, M>,
+{
+  fn compose_child_from(from: FatObj<Pair<State<W>, C>>) -> Self {
+    let pair = from.map(|p| {
+      let Pair { parent, child } = p;
+      Pair { parent, child: child.into_child_compose() }
+    });
+    Self(pair)
+  }
+}
+
+impl<T> ChildOfCompose for FatObj<T> {}
 
 #[cfg(test)]
 mod tests {
@@ -408,7 +552,7 @@ mod tests {
     // with single child
     let _e = fn_widget! {
       let p = pipe!{
-        move || {
+        fn_widget! {
           @MockBox { size: if $c_size.area() > 0. { *$c_size } else { Size::new(1., 1.)} }
         }
       };
@@ -428,7 +572,7 @@ mod tests {
     // option with single child
     let _e = fn_widget! {
       let p = pipe!(($c_size.area() > 0.).then(|| {
-        move || { @MockBox { size: Size::zero() }}
+        fn_widget! { @MockBox { size: Size::zero() }}
       }));
       @$p { @MockBox { size: Size::zero() } }
     };
@@ -436,7 +580,7 @@ mod tests {
     // option with `Widget`
     let _e = fn_widget! {
       let p = pipe!(($size.area() > 0.).then(|| {
-        move || { @MockBox { size: Size::zero() }}
+        fn_widget! { @MockBox { size: Size::zero() }}
       }));
       @$p { @ { Void }}
     };
@@ -455,27 +599,6 @@ mod tests {
     };
   }
 
-  #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
-  #[test]
-  fn pair_to_pair() {
-    reset_test_env!();
-
-    #[derive(Declare)]
-    struct P;
-
-    struct X;
-
-    impl<'c> ComposeChild<'c> for P {
-      type Child = WidgetOf<'c, X>;
-      fn compose_child(_: impl StateWriter<Value = Self>, _: Self::Child) -> Widget<'c> {
-        Void.into_widget()
-      }
-    }
-
-    let _ = fn_widget! {
-      @P { @{ Pair::new(X, Void)}}
-    };
-  }
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
   #[test]
   fn fix_multi_fill_for_pair() {
@@ -519,4 +642,38 @@ mod tests {
     WidgetTester::new(fn_widget! { @Host { @{ Field } }}),
     LayoutCase::default().with_size(FIX_OPTION_TEMPLATE_EXPECT_SIZE)
   );
+
+  #[test]
+  fn template_field() {
+    #[derive(Template)]
+    struct TemplateField {
+      #[template(field = 0)]
+      _x: i32,
+      #[template(field)]
+      _y: TextInit,
+      _child: Widget<'static>,
+    }
+
+    #[derive(Declare)]
+    struct X;
+
+    impl ComposeChild<'static> for X {
+      type Child = TemplateField;
+
+      fn compose_child(_: impl StateWriter<Value = Self>, _child: Self::Child) -> Widget<'static> {
+        unreachable!()
+      }
+    }
+
+    let _ = fn_widget! {
+      @X {
+        @TemplateField {
+          _y: "hi",
+          // x is optional, is has a default value of 0
+          // y: "hi",
+          @Void {}
+        }
+      }
+    };
+  }
 }
