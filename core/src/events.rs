@@ -28,7 +28,10 @@ pub use ime_pre_edit::*;
 mod lifecycle;
 pub use lifecycle::*;
 
+mod device_id;
+pub use device_id::*;
 pub(crate) mod focus_mgr;
+pub use focus_mgr::*;
 mod listener_impl_helper;
 
 pub struct CommonEvent {
@@ -42,8 +45,6 @@ pub struct CommonEvent {
   prevent_default: bool,
 }
 
-pub type FocusEvent = CommonEvent;
-pub type FocusBubbleEvent = CommonEvent;
 impl CommonEvent {
   /// The target property of the Event interface is a reference to the object
   /// onto which the event was dispatched. It is different from
@@ -117,12 +118,16 @@ impl CommonEvent {
 }
 
 pub enum Event {
-  /// Event fired when the widget is mounted. This event is fired only once.
+  /// Fired when a widget is mounted to the tree.
+  ///
+  /// Occurs exactly once per widget lifetime.
   Mounted(LifecycleEvent),
   /// Event fired when the widget is performed layout. This event may fire
   /// multiple times in same frame if a widget modified after performed layout.
   PerformedLayout(LifecycleEvent),
-  /// Event fired when the widget is disposed. This event is fired only once.
+  /// Fired when a widget is permanently removed from the tree.
+  ///
+  /// Occurs exactly once per widget lifetime.
   Disposed(LifecycleEvent),
   PointerDown(PointerEvent),
   PointerDownCapture(PointerEvent),
@@ -186,10 +191,8 @@ impl std::ops::Deref for Event {
 
   fn deref(&self) -> &Self::Target {
     match self {
-      Event::Mounted(e)
-      | Event::PerformedLayout(e)
-      | Event::Disposed(e)
-      | Event::Focus(e)
+      Event::Mounted(e) | Event::PerformedLayout(e) | Event::Disposed(e) => e,
+      Event::Focus(e)
       | Event::Blur(e)
       | Event::FocusIn(e)
       | Event::FocusInCapture(e)
@@ -219,10 +222,8 @@ impl std::ops::Deref for Event {
 impl std::ops::DerefMut for Event {
   fn deref_mut(&mut self) -> &mut Self::Target {
     match self {
-      Event::Mounted(e)
-      | Event::PerformedLayout(e)
-      | Event::Disposed(e)
-      | Event::Focus(e)
+      Event::Mounted(e) | Event::PerformedLayout(e) | Event::Disposed(e) => e,
+      Event::Focus(e)
       | Event::Blur(e)
       | Event::FocusIn(e)
       | Event::FocusInCapture(e)

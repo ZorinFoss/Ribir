@@ -25,6 +25,51 @@ Please only add new entries below the [Unreleased](#unreleased---releasedate) he
 
 ## [@Unreleased] - @ReleaseDate
 
+## [0.4.0-alpha.33] - 2025-04-16
+
+### Features
+
+- **core**: Add `Reusable` helper to enable widget recycling and reuse. (#737 @M-Adoo)
+
+
+## [0.4.0-alpha.32] - 2025-04-09
+
+### Features
+
+- **core**: Add built-in method `focus_change_reason` to retrieve last focus/blur event cause. (#734 by @M-Adoo)
+- **core**: Add reason in `FocusEvent` to indicate the cause of focus change. (#734 @M-Adoo)
+- **painter**: Add `fork()`/`merge()` methods for `Painter` for low-cost layer composition (#736 @M-Adoo)
+- **material**: Add `InteractiveLayers` to provide material design interactive layers for its child. (#736 @M-Adoo)
+
+
+
+### Fixed
+
+- **core**: Fix `FittedBox` to always center its child (#727 by @M-Adoo)
+- **core**: Fix incorrect drop pointer press or release event when multiple devices are used simultaneously, ensuring that only the tap event is dropped while other events are fired correctly. (#730 @M-Adoo)
+- **core**: Fix the bug where the outer data of the first child is incorrectly wrapped around each child when the pipe dynamically generates multiple children. (#735 @wjian23)
+
+
+### Changed
+
+- **widgets**: The `List` widgets has been redesigned with class-based styling and cleaner syntax. (#727 @M-Adoo)
+- **ribir**: Updated winit dependency to v0.30.* (#728 @M-Adoo)
+- **ribir**: Updated wgpu dependency to v0.24.* (#728 @M-Adoo)
+
+
+### BREAKING CHANGES
+
+- **core**: Standardize built-in method naming conventions: (#734 @M-Adoo)
+  - Boolean state checks (past participle):
+    - `has_focus` → `is_focused`
+    - `is_hover` → `is_hovered`
+  - Property accessors:
+    - `is_auto_focus` → `auto_focus` (getter)
+- **ribir/web**: Changed canvas management strategy: (#728 @M-Adoo)
+  - Now searches for `ribir_container` element to append new canvas
+  - No longer reuses existing canvas elements
+
+
 ## [0.4.0-alpha.31] - 2025-04-02
 
 ### Features
@@ -725,7 +770,9 @@ We are very happy to share it with you. We hope you can try it out and give us f
 - **get started**: add the `get_started` series of tutorials to help users get started with Ribir.
 
 <!-- next-url -->
-[@Unreleased]: https://github.com/RibirX/Ribir/compare/ribir-v0.4.0-alpha.31...HEAD
+[@Unreleased]: https://github.com/RibirX/Ribir/compare/ribir-v0.4.0-alpha.33...HEAD
+[0.4.0-alpha.33]: https://github.com/RibirX/Ribir/compare/ribir-v0.4.0-alpha.32...ribir-v0.4.0-alpha.33
+[0.4.0-alpha.32]: https://github.com/RibirX/Ribir/compare/ribir-v0.4.0-alpha.31...ribir-v0.4.0-alpha.32
 [0.4.0-alpha.31]: https://github.com/RibirX/Ribir/compare/ribir-v0.4.0-alpha.30...ribir-v0.4.0-alpha.31
 [0.4.0-alpha.30]: https://github.com/RibirX/Ribir/compare/ribir-v0.4.0-alpha.29...ribir-v0.4.0-alpha.30
 [0.4.0-alpha.29]: https://github.com/RibirX/Ribir/compare/ribir-v0.4.0-alpha.27...ribir-v0.4.0-alpha.29

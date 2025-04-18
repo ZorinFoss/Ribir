@@ -1,13 +1,14 @@
-use ribir_core::prelude::*;
-use ribir_widgets::prelude::*;
+use ribir_core::{prelude::*, rxrust::ops::throttle::ThrottleEdge, wrap_render::WrapRender};
 
 use crate::md;
 
 const HOVER_OPACITY: u8 = 8;
 const PRESSED_OPACITY: u8 = 10;
+const FOCUS_OPACITY: u8 = 10;
 
 pub type HoverLayer = StateLayer<HOVER_OPACITY>;
 pub type PressedLayer = StateLayer<PRESSED_OPACITY>;
+pub type FocusLayer = StateLayer<FOCUS_OPACITY>;
 
 #[derive(Debug, Clone)]
 pub struct StateLayer<const M: u8> {
@@ -19,34 +20,65 @@ impl PressedLayer {
   /// Create a pressed state layer in a hidden state. This layer is only a
   /// visual effect and not track the interactive state to control to show or
   /// hide.
-  pub fn new(path: impl Into<LayerArea>) -> FatObj<Stateful<PressedLayer>> {
-    FatObj::new(Stateful::new(Self { area: path.into(), draw_opacity: 0. }))
+  pub fn new(path: LayerArea) -> FatObj<Stateful<PressedLayer>> {
+    FatObj::new(Stateful::new(Self { area: path, draw_opacity: 0. }))
   }
 }
 
 impl HoverLayer {
-  /// Create a hover state layer displaying only when the pointer is hovering
+  /// Create a hover layer displaying only when the pointer is hovering
   /// this widget.
-  pub fn tracked(path: impl Into<LayerArea>) -> FatObj<Stateful<HoverLayer>> {
-    let layer = Stateful::new(Self { area: path.into(), draw_opacity: 0. });
+  pub fn created_for(area: LayerArea, host: &mut FatObj<Widget>) -> Stateful<HoverLayer> {
+    let layer = Stateful::new(Self { area, draw_opacity: 0. });
     part_writer!(&mut layer.draw_opacity).transition(EasingTransition {
       easing: md::easing::STANDARD,
-      duration: md::easing::duration::SHORT1,
+      duration: md::easing::duration::SHORT2,
     });
-    let mut layer = FatObj::new(layer);
-    let layer2 = layer.clone_writer();
 
-    let hover = layer.get_mix_flags_widget().clone_reader();
-    let u = watch!($layer.is_hover())
+    let u = watch!($host.is_hovered())
       // Delay hover effects to prevent displaying this layer while scrolling.
-      .delay(Duration::from_millis(50), AppCtx::scheduler())
-      .subscribe(move |_| {
-        layer2
-          .write()
-          .set_visible_state(hover.read().is_hover());
+      .throttle_time(Duration::from_millis(100), ThrottleEdge::tailing(), AppCtx::scheduler())
+      .distinct_until_changed()
+      .subscribe({
+        let layer = layer.clone_writer();
+        move |visible| layer.write().set_visible_state(visible)
       });
-    layer.on_disposed(move |_| u.unsubscribe());
+    host.on_disposed(move |_| u.unsubscribe());
+
     layer
+  }
+}
+
+impl FocusLayer {
+  /// Create a focused layer displaying only when the widget is focused.
+  pub fn create_for(host: &mut FatObj<Widget>) -> Stateful<FocusLayer> {
+    let layer = Stateful::new(Self { area: LayerArea::FullContent, draw_opacity: 0. });
+    part_writer!(&mut layer.draw_opacity).transition(EasingTransition {
+      easing: md::easing::STANDARD,
+      duration: md::easing::duration::SHORT2,
+    });
+
+    let u = watch! {
+      $host.is_focused()
+      && $host.focus_changed_reason() == FocusReason::Keyboard
+    }
+    .distinct_until_changed()
+    .subscribe({
+      let layer = layer.clone_writer();
+      move |v| layer.write().set_visible_state(v)
+    });
+    host.on_disposed(move |_| u.unsubscribe());
+
+    layer
+  }
+}
+
+impl PressedLayer {
+  /// Create a pressed state layer in a hidden state. This layer is only a
+  /// visual effect and not track the interactive state to control to show or
+  /// hide.
+  pub fn pressed(area: LayerArea) -> FatObj<Stateful<PressedLayer>> {
+    FatObj::new(Stateful::new(StateLayer { area, draw_opacity: 0. }))
   }
 }
 
@@ -70,61 +102,77 @@ impl<'c, const M: u8> ComposeChild<'c> for StateLayer<M> {
   type Child = Widget<'c>;
 
   fn compose_child(this: impl StateWriter<Value = Self>, child: Self::Child) -> Widget<'c> {
-    stack! {
-      fit: StackFit::Passthrough,
-      @ { child }
-      @ {
-        match this.try_into_value() {
-          Ok(value) => value.into_widget(),
-          Err(this) => WriterRender::new(this).into_widget()
+    WrapRender::combine_child(this, child, DirtyPhase::Paint)
+  }
+}
+
+impl<const M: u8> WrapRender for StateLayer<M> {
+  fn paint(&self, host: &dyn Render, ctx: &mut PaintingCtx) {
+    let StateLayer { area, draw_opacity } = self;
+    if *draw_opacity <= 0. {
+      return host.paint(ctx);
+    }
+
+    // Fork a painter to create an overlay without affecting the main painter's
+    // state
+    let mut layer = ctx.painter().fork();
+    host.paint(ctx);
+
+    layer.apply_alpha(*draw_opacity);
+    match area {
+      LayerArea::Circle { center, radius, constrain_to_bounds } => {
+        if *constrain_to_bounds {
+          layer.clip(widget_boundary(ctx).into());
         }
+        layer.circle(*center, *radius).fill()
+      }
+      LayerArea::FullContent => layer.fill_path(widget_boundary(ctx).into()),
+    };
+    ctx.painter().merge(&mut layer);
+  }
+
+  fn visual_box(&self, host: &dyn Render, ctx: &mut VisualCtx) -> Option<Rect> {
+    if let LayerArea::Circle { radius, .. } = self.area {
+      if self.draw_opacity > 0. {
+        let rect = Rect::from_size(Size::splat(radius * 2.));
+        let union = host
+          .visual_box(ctx)
+          .map_or(rect, |v| v.union(&rect));
+        return Some(union);
       }
     }
-    .into_widget()
+
+    host.visual_box(ctx)
   }
 }
 
-impl<const M: u8> Render for StateLayer<M> {
-  fn perform_layout(&self, clamp: BoxClamp, _: &mut LayoutCtx) -> Size { clamp.min }
-
-  fn visual_box(&self, ctx: &mut VisualCtx) -> Option<Rect> {
-    Some(Rect::from_size(ctx.box_size()?))
-  }
-
-  fn paint(&self, ctx: &mut PaintingCtx) {
-    let StateLayer { area, draw_opacity } = self;
-    if *draw_opacity > 0. {
-      let p = ctx.parent().unwrap();
-      let size = ctx.widget_box_size(p).unwrap();
-      let rect = Rect::from_size(size);
-      let painter = ctx.painter().apply_alpha(*draw_opacity);
-      match area {
-        LayerArea::Circle { center, radius, clip } => {
-          if let Some(clip) = clip {
-            painter.clip(Path::rect_round(&rect, clip).into());
-          }
-          painter.circle(*center, *radius).fill()
-        }
-        LayerArea::WidgetCover(radius) => painter.rect_round(&rect, radius).fill(),
-      };
-    }
-  }
-
-  fn dirty_phase(&self) -> DirtyPhase { DirtyPhase::Paint }
-
-  fn hit_test(&self, _: &mut HitTestCtx, _: Point) -> HitTest {
-    // This widget only serves as a visual effect and should not affect the hit
-    // test.
-    HitTest { hit: false, can_hit_child: false }
-  }
-}
-
-/// The path of a state layer to fill can either be a radius that fills the
-/// widget box with a radius or a specific path.
+/// Defines a visual layer region that doesn't participate in layout
+/// calculations.
 ///
-/// This path will not affect the widget layout; it is purely for visual effect.
+/// These areas are used exclusively for post-layout visual effects.
 #[derive(Debug, Clone, PartialEq)]
 pub enum LayerArea {
-  Circle { center: Point, radius: f32, clip: Option<Radius> },
-  WidgetCover(Radius),
+  /// Circular clipping/masking region with optional boundary constraint
+  ///
+  /// - `center`: Local coordinates relative to widget origin
+  /// - `radius`: Radius in logical pixels
+  /// - `constrain_to_bounds`: When true, automatically clamps the circle to
+  ///   stay within the widget's content rectangle
+  Circle { center: Point, radius: f32, constrain_to_bounds: bool },
+
+  /// Full coverage of widget's layout frame including padding
+  ///
+  /// Uses the final calculated layout rect after padding has been applied,
+  /// matching the widget's visible content area.
+  FullContent,
+}
+
+fn widget_boundary(ctx: &PaintingCtx) -> Path {
+  let rect = Rect::from_size(ctx.box_size().unwrap());
+  let widget_radius = Provider::of::<Radius>(ctx);
+  if let Some(radius) = widget_radius {
+    Path::rect_round(&rect, &radius)
+  } else {
+    Path::rect(&rect)
+  }
 }

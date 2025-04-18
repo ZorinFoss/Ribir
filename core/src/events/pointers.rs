@@ -79,25 +79,20 @@ impl_common_event_deref!(PointerEvent);
 #[cfg(test)]
 mod tests {
 
-  use winit::{
-    dpi::LogicalPosition,
-    event::{DeviceId, ElementState, MouseButton, WindowEvent},
-  };
+  use winit::{dpi::LogicalPosition, event::WindowEvent};
 
   use crate::{prelude::*, reset_test_env, test_helper::*};
 
   fn tap_on(wnd: &Window, x: f32, y: f32) {
-    let device_id = unsafe { DeviceId::dummy() };
     let logical = LogicalPosition::new(x, y);
     #[allow(deprecated)]
     wnd.processes_native_event(WindowEvent::CursorMoved {
-      device_id,
+      device_id: winit::event::DeviceId::dummy(),
       position: logical.to_physical(1.),
     });
 
-    wnd.process_mouse_input(device_id, ElementState::Pressed, MouseButton::Left);
-
-    wnd.process_mouse_input(device_id, ElementState::Released, MouseButton::Left);
+    wnd.process_mouse_press(Box::new(DummyDeviceId), MouseButtons::PRIMARY);
+    wnd.process_mouse_release(Box::new(DummyDeviceId), MouseButtons::PRIMARY);
   }
 
   #[test]
@@ -109,7 +104,7 @@ mod tests {
 
     let w = fn_widget! {
       let mut host = @MockMulti {};
-      watch!($host.has_focus())
+      watch!($host.is_focused())
         .subscribe(move |v| *$w_focused.write() = v);
 
       @$host {
