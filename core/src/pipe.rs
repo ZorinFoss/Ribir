@@ -5,7 +5,6 @@ use std::{
   ptr::NonNull,
 };
 
-use ahash::HashMap;
 use ribir_algo::Sc;
 use rxrust::ops::box_it::BoxOp;
 use smallvec::SmallVec;
@@ -14,18 +13,6 @@ use widget_id::RenderQueryable;
 use crate::{prelude::*, render_helper::PureRender};
 
 pub type ValueStream<V> = BoxOp<'static, (ModifyScope, V), Infallible>;
-
-pub(crate) trait PipeKeyWidget<'c, const M: usize> {
-  fn into_key_widget(self) -> (Option<Key>, Widget<'c>);
-}
-
-impl<'c, const M: usize, W: IntoWidget<'c, M>> PipeKeyWidget<'c, M> for W {
-  fn into_key_widget(self) -> (Option<Key>, Widget<'c>) { (None, self.into_widget()) }
-}
-
-impl<'c> PipeKeyWidget<'c, 0> for (Key, Widget<'c>) {
-  fn into_key_widget(self) -> (Option<Key>, Widget<'c>) { (Some(self.0), self.1) }
-}
 
 /// Trait used to create a widget from a pipe value.
 pub(crate) trait PipeWidget<const M: usize>: IntoWidget<'static, M> {
@@ -198,19 +185,19 @@ pub(crate) trait InnerPipe: Pipe + Sized {
   where
     Self::Value: FnOnce() -> I,
     I: IntoIterator,
-    <I as IntoIterator>::Item: PipeKeyWidget<'w, M>,
+    <I as IntoIterator>::Item: IntoWidget<'w, M>,
   {
     let node = PipeNode::empty_node();
     let mut init = PipeWidgetBuildInit::new(node.clone());
     let (m, modifies) = self.unzip(ModifyScope::FRAMEWORK, Some(init.clone()));
-    let mut iter = m().into_iter().map(|w| w.into_key_widget());
+    let mut iter = m().into_iter().map(|w| w.into_widget());
 
     let pipe_node = node.clone();
-    let (key, first) = iter
+    let first = iter
       .next()
-      .unwrap_or_else(|| (None, Void {}.into_widget()));
+      .unwrap_or_else(|| Void {}.into_widget());
     let first = first.on_build(move |id| {
-      pipe_node.init(id, GenRange::Multi(vec![(key, id)]));
+      pipe_node.init(id, GenRange::Multi(vec![id]));
       let tree_ptr = BuildCtx::get().tree_ptr();
       init.set_tree(tree_ptr);
 
@@ -230,42 +217,22 @@ pub(crate) trait InnerPipe: Pipe + Sized {
           });
         }
 
-        let mut old_key_widgets = old
-          .iter()
-          .filter_map(|(key, wid)| key.as_ref().map(|k| (k.clone(), *wid)))
-          .collect::<HashMap<Key, WidgetId>>();
-
         let ctx = BuildCtx::get_mut();
         let mut new = vec![];
-        let mut new_mounted = vec![];
-        for (idx, (key, w)) in m()
-          .into_iter()
-          .map(|w| w.into_key_widget())
-          .enumerate()
-        {
-          let id = if let Some(wid) = key
-            .as_ref()
-            .and_then(|k| old_key_widgets.remove(k))
-          {
-            wid
-          } else {
-            let id = ctx.build(w);
-            new_mounted.push(id);
-            id
-          };
+        for w in m().into_iter().map(|w| w.into_widget()) {
+          let id = ctx.build(w);
 
-          new.push((key, id));
-          set_pos_of_multi(id, idx, ctx.tree_mut());
+          new.push(id);
         }
         if new.is_empty() {
-          new.push((None, ctx.build(Void.into_widget())));
+          new.push(ctx.build(Void.into_widget()));
         }
 
         let dummy = ctx.build(Void {}.into_widget());
         let tree = ctx.tree_mut();
 
-        if new[0].1 != old[0].1 {
-          pipe_node.transplant_to_new(old_node, new[0].1, tree);
+        if new[0] != old[0] {
+          pipe_node.transplant_to_new(old_node, new[0], tree);
         } else {
           pipe_node.replace_data(old_node);
         }
@@ -274,26 +241,23 @@ pub(crate) trait InnerPipe: Pipe + Sized {
         // the current pipe. The self dynamic information will be updated at
         // the end,including the widget id and the key. So the key is only
         // used to the same level.
-        query_outside_infos(new[0].1, &pipe_node, tree).for_each(|node| {
+        query_outside_infos(new[0], &pipe_node, tree).for_each(|node| {
           node
             .dyn_info_mut()
-            .multi_replace(&old, new.iter().map(|(_, w)| *w))
+            .multi_replace(&old, new.iter().cloned())
         });
 
-        old[0].1.insert_after(dummy, tree);
+        old[0].insert_after(dummy, tree);
         new
           .iter()
           .rev()
-          .for_each(|(_, w)| dummy.insert_after(*w, tree));
+          .for_each(|w| dummy.insert_after(*w, tree));
 
-        old
-          .iter()
-          .filter(|(key, _)| if let Some(k) = key { old_key_widgets.contains_key(k) } else { true })
-          .for_each(|(_, id)| id.dispose_subtree(tree));
+        old.iter().for_each(|id| id.dispose_subtree(tree));
 
-        new_mounted.into_iter().for_each(|id| {
+        new.iter().for_each(|id| {
           id.on_mounted_subtree(tree);
-          tree.dirty_marker().mark(id, DirtyPhase::Layout);
+          tree.dirty_marker().mark(*id, DirtyPhase::Layout);
         });
 
         dummy.dispose_subtree(tree);
@@ -309,16 +273,16 @@ pub(crate) trait InnerPipe: Pipe + Sized {
     });
 
     let mut widgets = vec![first];
-    for (idx, (key, w)) in iter.enumerate() {
+    for w in iter {
       let pipe_node = node.clone();
       let w = w.on_build(move |id| {
         match &mut pipe_node.dyn_info_mut().gen_range {
-          GenRange::Multi(m) => m.push((key, id)),
+          GenRange::Multi(m) => m.push(id),
           _ => unreachable!(),
         };
 
         let tree = BuildCtx::get_mut().tree_mut();
-        if set_pos_of_multi(id, idx + 1, tree) {
+        if has_pipe_node(id, tree) {
           // We need to associate the parent information with the children pipe so that
           // when the child pipe is regenerated, it can update the parent pipe information
           // accordingly.
@@ -596,21 +560,18 @@ struct InnerPipeNode {
 
 #[derive(Debug)]
 pub(crate) struct DynWidgetsInfo {
-  pub(crate) multi_pos: usize,
   pub(crate) gen_range: GenRange,
 }
 
 #[derive(Debug)]
 pub enum GenRange {
   Single(WidgetId),
-  Multi(Vec<(Option<Key>, WidgetId)>),
+  Multi(Vec<WidgetId>),
   ParentOnly(RangeInclusive<WidgetId>),
 }
 
 impl DynWidgetsInfo {
-  pub(crate) fn new(range: GenRange) -> DynWidgetsInfo {
-    DynWidgetsInfo { gen_range: range, multi_pos: 0 }
-  }
+  pub(crate) fn new(range: GenRange) -> DynWidgetsInfo { DynWidgetsInfo { gen_range: range } }
 
   pub(crate) fn single_replace(&mut self, old: WidgetId, new: WidgetId) {
     match &mut self.gen_range {
@@ -619,8 +580,8 @@ impl DynWidgetsInfo {
         *id = new;
       }
       GenRange::Multi(m) => {
-        if let Some(idx) = m.iter().position(|w| w.1 == old) {
-          m[idx].1 = new;
+        if let Some(idx) = m.iter().position(|w| w == &old) {
+          m[idx] = new;
         }
       }
       GenRange::ParentOnly(p) => {
@@ -641,8 +602,8 @@ impl DynWidgetsInfo {
       GenRange::Single(id) => *id = *new.start(),
       GenRange::Multi(m) => {
         let p = *old.start();
-        if let Some(idx) = m.iter().position(|w| w.1 == p) {
-          m[idx].1 = *new.start();
+        if let Some(idx) = m.iter().position(|w| w == &p) {
+          m[idx] = *new.start();
         }
       }
       GenRange::ParentOnly(p) => {
@@ -656,18 +617,16 @@ impl DynWidgetsInfo {
     }
   }
 
-  fn multi_replace(
-    &mut self, old: &[(Option<Key>, WidgetId)], new: impl Iterator<Item = WidgetId>,
-  ) {
+  fn multi_replace(&mut self, old: &[WidgetId], new: impl Iterator<Item = WidgetId>) {
     match &mut self.gen_range {
       GenRange::Single(_) => unreachable!("Single pipe node never have multi pipe child."),
       GenRange::Multi(m) => {
-        if let Some(from) = m.iter().position(|w| old[0].1 == w.1) {
+        if let Some(from) = m.iter().position(|w| &old[0] == w) {
           let to = m
             .iter()
-            .position(|w| old[old.len() - 1].1 == w.1)
+            .position(|w| &old[old.len() - 1] == w)
             .expect("must include");
-          m.splice(from..=to, new.map(|w| (None, w)));
+          m.splice(from..=to, new);
         }
       }
       GenRange::ParentOnly(_) => {
@@ -679,14 +638,10 @@ impl DynWidgetsInfo {
   pub(crate) fn host_id(&self) -> WidgetId {
     match &self.gen_range {
       GenRange::Single(id) => *id,
-      GenRange::Multi(m) => m.first().unwrap().1,
+      GenRange::Multi(m) => *m.first().unwrap(),
       GenRange::ParentOnly(p) => *p.start(),
     }
   }
-
-  fn set_pos_of_multi(&mut self, pos: usize) { self.multi_pos = pos; }
-
-  fn pos_of_multi(&self) -> usize { self.multi_pos }
 }
 
 impl PipeNode {
@@ -764,12 +719,8 @@ impl PipeNode {
   }
 }
 
-fn set_pos_of_multi(w: WidgetId, pos: usize, tree: &WidgetTree) -> bool {
-  w.query_all_iter::<PipeNode>(tree)
-    .inspect(|node| node.dyn_info_mut().set_pos_of_multi(pos))
-    .count()
-    > 0
-}
+fn has_pipe_node(w: WidgetId, tree: &WidgetTree) -> bool { w.query_ref::<PipeNode>(tree).is_some() }
+
 fn query_outside_infos<'l>(
   id: WidgetId, to: &'l PipeNode, tree: &'l WidgetTree,
 ) -> impl Iterator<Item = QueryRef<'l, PipeNode>> {
@@ -791,8 +742,7 @@ fn pipe_priority_value(node: &PipeNode, tree: &WidgetTree) -> i64 {
   let depth = id.ancestors(tree).count() as i64;
   let embed = query_outside_infos(id, node, tree).count() as i64;
 
-  let pos = node.dyn_info().pos_of_multi() as i64;
-  depth << 60 | pos << 40 | embed
+  depth << 32 | embed
 }
 
 impl Query for PipeNode {

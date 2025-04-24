@@ -22,18 +22,19 @@ lyon_geom.workspace = true
 paste.workspace = true
 triomphe.workspace = true
 pin-project-lite.workspace = true
-ribir_algo = {path = "../algo", version = "0.4.0-alpha.33" }
-ribir_geom = {path = "../geom", version = "0.4.0-alpha.33" }
-ribir_macros = {path = "../macros", version = "0.4.0-alpha.33" }
-ribir_painter = {path = "../painter", version = "0.4.0-alpha.33" }
+ribir_algo = {path = "../algo", version = "0.4.0-alpha.34" }
+ribir_geom = {path = "../geom", version = "0.4.0-alpha.34" }
+ribir_macros = {path = "../macros", version = "0.4.0-alpha.34" }
+ribir_painter = {path = "../painter", version = "0.4.0-alpha.34" }
 rxrust.workspace = true
 smallvec.workspace = true
 winit.workspace = true
 tokio = { workspace = true, optional = true, features = ["rt-multi-thread", "rt"]}
 priority-queue = { workspace = true }
+url.workspace = true
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-web-sys.workspace = true
+web-sys = { workspace = true, features = ["Location", "Window", "History"]}
 web-time.workspace = true
 
 [dev-dependencies]
