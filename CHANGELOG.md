@@ -25,14 +25,45 @@ Please only add new entries below the [Unreleased](#unreleased---releasedate) he
 
 ## [@Unreleased] - @ReleaseDate
 
+## [0.4.0-alpha.37] - 2025-05-14
+
+### Features
+
+- **painter**: Support jpeg image. (#753 @wjian23)
+
+### Changed
+
+- **core**: Simplify type conversion system by unifying implementations under `RFrom` and `RInto` traits (by @M-Adoo)
+
+
+## [0.4.0-alpha.36] - 2025-05-07
+
+### Features
+
+- **core**: Added common fallback system fonts list function `fallback_font_families`, so that themes can use. (#748 @M-Adoo)
+
+### BREAKING
+
+- **core**: The `ComposeDecorator` trait has been removed. (#754 @M-Adoo)
+
+## [0.4.0-alpha.35] - 2025-04-30
+
 ### Fixed
 - **core**: Fixed the priority of the pipe does not depend on its position (the previous position was not accurately tracked). (#742 @wjian23)
+- **core**: Fixed incorrect child positioning during `box_fit` scaling (#743 by @M-Adoo)
+- **widgets**: Fixed infinite layout loop caused by `Scrollbar` during window resizing (#743  @M-Adoo)
+- **widgets**: Prevent stack re-layout when subtree of InParentLayout changed.(#745 @wjian23)
+- **widgets**: Constrain the size of Expanded when the remaining space for Expanded in Flex is zero(#747 @wjian23)
+
+### BREAKING CHANGES
+- **core**: method of Render `only_sized_by_parent` rename to `size_affected_by_child`, Widget `OnlySizedByParent` rename to `NoAffectedParentSize`.(#745 @wjian23)
 
 ## [0.4.0-alpha.34] - 2025-04-23
 
 ### Features
 
 - **core**: Added `Location` provider to manage and track user navigation positions within application windows. (#740 @M-Adoo)
+- **widgets**: Added `Router` widget to handle navigation within window. (#746 @M-Adoo)
 
 ### Fixed
 - **core**: Fixed `Reuseable` panic when when holding the same Reuseable while pipe changes continuously.(#741 @wjian23)
@@ -137,7 +168,6 @@ Please only add new entries below the [Unreleased](#unreleased---releasedate) he
 - **core**: Use minimum constraint size for viewport in unbounded layouts (#708 by @M-Adoo)
 - **painter**: Properly discard render operations when clipping to zero-sized rectangles (#708 @M-Adoo)
 - **macro**: Fixed issue where top-level `fn_widget!` macro did not capture a built-in widget. (#706 @M-Adoo)
-- **widgets**: `Flex` now stretches cross-axis items using final line dimensions instead of constraint clamping. (#707 by @M-Adoo)
 - **core**: Fixed track_id in class node not update.(#712 @wjian23)
 - **core**: Fixed FocusScope not work when host changed by class or pipe.(#712@wjian23)
 
@@ -533,10 +563,9 @@ Please only add new entries below the [Unreleased](#unreleased---releasedate) he
 
 ### Features
 
-- **core**: Introduced `IntoWidget` and `IntoChild`. (@M-Adoo #612)
+- **core**: Introduced `IntoWidget`. (@M-Adoo #612)
 
   The `IntoWidget` trait allows for the conversion of any widget to the type `Widget`.
-  The `IntoChild` trait provides a way to convert a more general type into a child of `ComposeChild`.
 
 ### Fixed
 
@@ -545,9 +574,6 @@ Please only add new entries below the [Unreleased](#unreleased---releasedate) he
 ### Changed
 
 - **core**: Lazy build the widget tree. (#612, @M-Adoo)
-- **core**: Simplify the implementation of parent composition with child widgets. (#612, @M-Adoo)
-
-  Merge `SingleWithChild`, `MultiWithChild`, and `ComposeWithChild` into a single trait called WithChild.
 
 ### Breaking
 
@@ -565,7 +591,6 @@ Please only add new entries below the [Unreleased](#unreleased---releasedate) he
 ### Features
 
 - **core**: Added support to query a `WriteRef` from a state, enabling users to modify the state after attaching it to a widget. (#601 @M-Adoo)
-- **core**: Introduced the `DeclareInto` trait for any type that implements `DeclareFrom`. (#604 @M-Adoo)
 - **macros**: Improved widget declaration to allow specifying widget types via path. (#606 @M-Adoo)
 
   ```rust
@@ -785,7 +810,10 @@ We are very happy to share it with you. We hope you can try it out and give us f
 - **get started**: added the `get_started` series of tutorials to help users get started with Ribir.
 
 <!-- next-url -->
-[@Unreleased]: https://github.com/RibirX/Ribir/compare/ribir-v0.4.0-alpha.34...HEAD
+[@Unreleased]: https://github.com/RibirX/Ribir/compare/ribir-v0.4.0-alpha.37...HEAD
+[0.4.0-alpha.37]: https://github.com/RibirX/Ribir/compare/ribir-v0.4.0-alpha.36...ribir-v0.4.0-alpha.37
+[0.4.0-alpha.36]: https://github.com/RibirX/Ribir/compare/ribir-v0.4.0-alpha.35...ribir-v0.4.0-alpha.36
+[0.4.0-alpha.35]: https://github.com/RibirX/Ribir/compare/ribir-v0.4.0-alpha.34...ribir-v0.4.0-alpha.35
 [0.4.0-alpha.34]: https://github.com/RibirX/Ribir/compare/ribir-v0.4.0-alpha.33...ribir-v0.4.0-alpha.34
 [0.4.0-alpha.33]: https://github.com/RibirX/Ribir/compare/ribir-v0.4.0-alpha.32...ribir-v0.4.0-alpha.33
 [0.4.0-alpha.32]: https://github.com/RibirX/Ribir/compare/ribir-v0.4.0-alpha.31...ribir-v0.4.0-alpha.32

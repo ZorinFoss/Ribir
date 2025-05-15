@@ -64,7 +64,7 @@ pub enum IconChild<'c> {
   /// The text to display as a icon.
   ///
   /// Use a `DeclareInit<CowArc<str>>` so that we can accept a pipe text.
-  FontIcon(TextInit),
+  FontIcon(TextValue),
   Widget(Widget<'c>),
 }
 
@@ -136,7 +136,7 @@ impl Render for IconRender {
     Some(Transform::scale(scale, scale))
   }
 
-  fn only_sized_by_parent(&self) -> bool { true }
+  fn size_affected_by_child(&self) -> bool { false }
 }
 
 impl<'c> IconChild<'c> {

@@ -40,9 +40,9 @@ macro_rules! reset_test_env {
 
 impl TestWindow {
   /// Create a 1024x1024 window for test
-  pub fn new(root: impl Into<GenWidget>) -> Self { Self::new_wnd(root, None) }
+  pub fn new<K: ?Sized>(root: impl RInto<GenWidget, K>) -> Self { Self::new_wnd(root, None) }
 
-  pub fn new_with_size(root: impl Into<GenWidget>, size: Size) -> Self {
+  pub fn new_with_size<K: ?Sized>(root: impl RInto<GenWidget, K>, size: Size) -> Self {
     Self::new_wnd(root, Some(size))
   }
 
@@ -52,11 +52,11 @@ impl TestWindow {
     assert_eq!(info.size.unwrap(), size);
   }
 
-  fn new_wnd(root: impl Into<GenWidget>, size: Option<Size>) -> Self {
+  fn new_wnd<K: ?Sized>(root: impl RInto<GenWidget, K>, size: Option<Size>) -> Self {
     let _ = NEW_TIMER_FN.set(Timer::new_timer_future);
     AppCtx::run_until_stalled();
 
-    let wnd = AppCtx::new_window(Box::new(TestShellWindow::new(size)), root.into());
+    let wnd = AppCtx::new_window(Box::new(TestShellWindow::new(size)), root.r_into());
     let mut flags = wnd.flags();
     flags.remove(WindowFlags::ANIMATIONS);
     wnd.set_flags(flags);
@@ -107,6 +107,8 @@ impl TestWindow {
     AppCtx::frame_ticks().clone().next(Instant::now());
     self.0.draw_frame(false);
   }
+
+  pub fn fmt_tree(&self) -> String { self.tree().display_tree(self.tree().root()) }
 }
 
 impl std::ops::Deref for TestWindow {
@@ -248,7 +250,7 @@ impl Render for MockBox {
     size
   }
   #[inline]
-  fn only_sized_by_parent(&self) -> bool { true }
+  fn size_affected_by_child(&self) -> bool { false }
 
   #[inline]
   fn paint(&self, _: &mut PaintingCtx) {}
@@ -374,8 +376,14 @@ pub struct WidgetTester {
 type InitdFn = Box<dyn FnOnce(&mut TestWindow)>;
 
 impl WidgetTester {
-  pub fn new(widget: impl Into<GenWidget>) -> Self {
-    Self { wnd_size: None, widget: widget.into(), on_initd: None, env_init: None, comparison: None }
+  pub fn new<K: ?Sized>(widget: impl RInto<GenWidget, K>) -> Self {
+    Self {
+      wnd_size: None,
+      widget: widget.r_into(),
+      on_initd: None,
+      env_init: None,
+      comparison: None,
+    }
   }
 
   pub fn with_env_init(mut self, env_init: impl Fn() + 'static) -> Self {

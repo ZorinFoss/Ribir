@@ -1,5 +1,6 @@
 use ribir_core::prelude::*;
 
+use crate::prelude::{NoAffectedParentSize, no_affected_parent_size};
 /// A widget that overlaps its children, allowing for flexible layout
 /// management.
 ///
@@ -17,7 +18,8 @@ pub struct Stack {
 }
 
 /// A widget that indicates to its parent that it should perform layout within
-/// the parent's bounds.
+/// the parent's bounds, and the layout changes to the subtree do not
+/// trigger stack to re-layout.
 ///
 /// This widget is used to control the layout behavior of its child within a
 /// `Stack`.
@@ -57,6 +59,7 @@ pub enum StackFit {
   /// Passes the constraints through without modification.
   Passthrough,
 }
+
 impl Render for Stack {
   fn perform_layout(&self, clamp: BoxClamp, ctx: &mut LayoutCtx) -> Size {
     // Determine appropriate clamp based on stack fit
@@ -85,33 +88,23 @@ impl Render for Stack {
     });
 
     // Layout regular children first
-    let mut stack_size = regulars
+    let stack_size = regulars
       .into_iter()
       .fold(ZERO_SIZE, |max_size, child| {
         let child_size = ctx.perform_child_layout(child, stack_clamp);
         max_size.max(child_size)
       });
 
-    // Handle special in-parent children based on current layout size
-    if stack_size.is_empty() && clamp.min.is_empty() {
-      // When no regular children, layout in-parent children with original constraints
+    // When we have valid size, layout in-parent children with parent-relative
+    // constraints
+    let stack_size = clamp.clamp(stack_size);
+    if !in_parents.is_empty() {
+      let parent_relative_clamp = BoxClamp::max_size(stack_size);
       in_parents.into_iter().for_each(|child| {
-        let child_size = ctx.perform_child_layout(child, stack_clamp);
-        stack_size = stack_size.max(child_size);
+        ctx.perform_child_layout(child, parent_relative_clamp);
       });
-      clamp.clamp(stack_size)
-    } else {
-      // When we have valid size, layout in-parent children with parent-relative
-      // constraints
-      let stack_size = clamp.clamp(stack_size);
-      if !in_parents.is_empty() {
-        let parent_relative_clamp = BoxClamp::max_size(stack_size);
-        in_parents.into_iter().for_each(|child| {
-          ctx.perform_child_layout(child, parent_relative_clamp);
-        });
-      }
-      stack_size
     }
+    stack_size
   }
 }
 
@@ -119,7 +112,11 @@ impl<'c> ComposeChild<'c> for InParentLayout {
   type Child = Widget<'c>;
 
   fn compose_child(_: impl StateWriter<Value = Self>, child: Self::Child) -> Widget<'c> {
-    child.attach_data(Box::new(Queryable(InParentLayout)))
+    no_affected_parent_size! {
+      @ {child}
+    }
+    .into_widget()
+    .attach_data(Box::new(Queryable(InParentLayout)))
   }
 }
 #[cfg(test)]
@@ -189,7 +186,9 @@ mod tests {
       }
     }),
     LayoutCase::default().with_size(TEN),
-    LayoutCase::new(&[0, 1]).with_size(ONE).with_x(9.)
+    LayoutCase::new(&[0, 1, 0])
+      .with_size(ONE)
+      .with_x(9.)
   );
 
   widget_layout_test!(

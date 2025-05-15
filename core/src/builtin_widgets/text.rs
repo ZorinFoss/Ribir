@@ -5,7 +5,7 @@ use typography::PlaceLineDirection;
 
 use crate::prelude::*;
 
-pub type TextInit = DeclareInit<CowArc<str>>;
+pub type TextValue = PipeValue<CowArc<str>>;
 /// The text widget displays text with a single style.
 ///
 /// The `TextStyle` provider is utilized to format the text.
@@ -76,7 +76,7 @@ impl Render for Text {
   }
 
   #[inline]
-  fn only_sized_by_parent(&self) -> bool { false }
+  fn size_affected_by_child(&self) -> bool { false }
 
   fn paint(&self, ctx: &mut PaintingCtx) {
     let style = Provider::of::<PaintingStyle>(ctx).map(|p| p.clone());
@@ -87,7 +87,7 @@ impl Render for Text {
 }
 
 impl Text {
-  pub fn new<const M: u8>(text: impl Into<CowArc<str>>) -> Self {
+  pub fn new(text: impl Into<CowArc<str>>) -> Self {
     Self { text: text.into(), glyphs: Default::default() }
   }
   pub fn glyphs(&self) -> Option<Ref<VisualGlyphs>> {

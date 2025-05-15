@@ -2,12 +2,9 @@ use ribir::{material::material_svgs, prelude::*};
 use webbrowser::{Browser, open_browser};
 
 fn header() -> Widget<'static> {
-  static TITLE: &str = "Material Design";
-  fn_widget! {
-    @Text {
-      margin: EdgeInsets::vertical(22.),
-      text: TITLE
-    }
+  text! {
+    margin: EdgeInsets::vertical(22.),
+    text: "Material Design"
   }
   .into_widget()
 }
@@ -15,9 +12,10 @@ fn header() -> Widget<'static> {
 fn content() -> Widget<'static> {
   fn actions_show() -> GenWidget {
     scrollbar! {
+      h_align: HAlign::Stretch,
       @Stack {
+        h_align: HAlign::Center,
         @Column {
-          h_align: HAlign::Center,
           align_items: Align::Center,
           @Column {
             align_items: Align::Center,
@@ -118,7 +116,7 @@ fn content() -> Widget<'static> {
         }
       }
     }
-    .into()
+    .r_into()
   }
 
   fn tabs_show() -> GenWidget {
@@ -141,7 +139,7 @@ fn content() -> Widget<'static> {
         }
       }
     }
-    .into()
+    .r_into()
   }
 
   fn containment_show() -> GenWidget {
@@ -160,7 +158,7 @@ fn content() -> Widget<'static> {
         @Divider {}
       }
     }
-    .into()
+    .r_into()
   }
 
   fn lists_show() -> GenWidget {
@@ -207,7 +205,7 @@ fn content() -> Widget<'static> {
           }
           @Divider { indent: DividerIndent::Start }
           @ListItem {
-            @ListItemThumbNail {
+            @ListItemThumbnail {
               @Resource::new(PixelImage::from_png(include_bytes!("../../attachments/3DDD-3.png")))
             }
             @ListItemHeadline { @ { "One lines list item" } }
@@ -217,7 +215,7 @@ fn content() -> Widget<'static> {
         }
       }
     }
-    .into()
+    .r_into()
   }
 
   fn checkbox_show() -> GenWidget {
@@ -238,12 +236,11 @@ fn content() -> Widget<'static> {
         }
       }
     }
-    .into()
+    .r_into()
   }
 
   fn_widget! {
     @Tabs {
-      h_align: HAlign::Stretch,
       providers: [Provider::new(TabPos::Bottom)],
       @Tab {
         @ { "Actions" }

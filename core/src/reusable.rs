@@ -12,6 +12,9 @@ use crate::{
 /// A container that enables efficient reuse of widget instances across multiple
 /// placements.
 ///
+/// Prefer using [`ReuseId`] for widget reuse between scopes instead of manually
+/// managing reuse.
+///
 /// This type maintains a widget that can be recycled when removed from the
 /// widget tree, allowing subsequent reuse through `get_widget()`. The widget is
 /// fully disposed when:
@@ -40,7 +43,7 @@ impl Reusable {
   ///
   /// returns`(Widget, Reusable)`, the Widget must be placed before the Reusable
   /// being used again, otherwise it will panic.
-  pub fn new<'a, const M: usize>(w: impl IntoWidget<'a, M>) -> (Widget<'a>, Self) {
+  pub fn new<'a, K>(w: impl IntoWidget<'a, K>) -> (Widget<'a>, Self) {
     let mut obj = FatObj::new(w);
     let track_id = obj.get_track_id_widget().read().track_id();
     let this = Self(Sc::new(RefCell::new(ReusableState::WaitToUse { track_id })));

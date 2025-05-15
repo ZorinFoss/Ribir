@@ -583,7 +583,7 @@ impl ProviderCtx {
 }
 
 impl Providers {
-  pub fn with_child<'w, const M: usize>(self, child: impl IntoWidget<'w, M>) -> Widget<'w> {
+  pub fn with_child<'w, K>(self, child: impl IntoWidget<'w, K>) -> Widget<'w> {
     let mut child = child.into_widget();
     self.restore_providers(BuildCtx::get_mut().as_mut());
 
@@ -698,7 +698,7 @@ impl Render for ProvidersRender {
     render.hit_test(ctx, pos)
   }
 
-  fn only_sized_by_parent(&self) -> bool { self.render.only_sized_by_parent() }
+  fn size_affected_by_child(&self) -> bool { self.render.size_affected_by_child() }
 
   fn get_transform(&self) -> Option<Transform> { self.render.get_transform() }
 }

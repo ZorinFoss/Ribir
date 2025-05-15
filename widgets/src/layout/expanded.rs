@@ -19,6 +19,8 @@ pub struct Expanded {
   /// ignore its own size constraints. Instead, it will wait for all other
   /// widgets to be allocated space first, and then divide the remaining
   /// available space based on its flex factor.
+  ///
+  /// The default value is `true`.
   pub defer_alloc: bool,
 }
 
@@ -36,24 +38,24 @@ impl Default for Expanded {
 
 #[derive(Default)]
 pub struct ExpandedDeclarer {
-  flex: Option<DeclareInit<f32>>,
-  defer_alloc: Option<DeclareInit<bool>>,
+  flex: Option<PipeValue<f32>>,
+  defer_alloc: Option<PipeValue<bool>>,
 }
 
 impl ExpandedDeclarer {
   #[track_caller]
-  pub fn flex<const M: usize>(&mut self, flex: impl DeclareInto<f32, M>) -> &mut Self {
+  pub fn flex<K: ?Sized>(&mut self, flex: impl RInto<PipeValue<f32>, K>) -> &mut Self {
     assert!(self.flex.is_none(), "`flex` is already set");
-    self.flex = Some(flex.declare_into());
+    self.flex = Some(flex.r_into());
     self
   }
 
   #[track_caller]
-  pub fn defer_alloc<const M: usize>(
-    &mut self, defer_alloc: impl DeclareInto<bool, M>,
+  pub fn defer_alloc<K: ?Sized>(
+    &mut self, defer_alloc: impl RInto<PipeValue<bool>, K>,
   ) -> &mut Self {
     assert!(self.defer_alloc.is_none(), "`defer_alloc` is already set");
-    self.defer_alloc = Some(defer_alloc.declare_into());
+    self.defer_alloc = Some(defer_alloc.r_into());
     self
   }
 }
@@ -71,7 +73,7 @@ impl ObjDeclarer for ExpandedDeclarer {
     let (flex, u_flex) = self.flex.map_or((1., None), |v| v.unzip());
     let (defer_alloc, u_defer_alloc) = self
       .defer_alloc
-      .map_or((false, None), |v| v.unzip());
+      .map_or((true, None), |v| v.unzip());
 
     let host = State::value(Expanded { flex, defer_alloc });
     let mut subscribes = SmallVec::new();
@@ -147,6 +149,7 @@ mod tests {
       @Row {
         wrap: true,
         @Expanded {
+          defer_alloc: false,
           flex: 1. ,
           @SizedBox { size }
         }
@@ -155,10 +158,12 @@ mod tests {
         @SizedBox { size }
         @SizedBox { size }
         @Expanded {
+          defer_alloc: false,
           flex: 1. ,
           @SizedBox { size, }
         }
         @Expanded {
+          defer_alloc: false,
           flex: 4.,
           @SizedBox { size, }
         }

@@ -187,7 +187,7 @@ class_names! {
   /// Image container within a list item
   LIST_ITEM_IMG,
   /// Thumbnail image container
-  LIST_ITEM_THUMB_NAIL,
+  LIST_ITEM_THUMBNAIL,
   /// Leading widget container (left side)
   LIST_ITEM_LEADING,
   /// Trailing widget container (right side)
@@ -268,20 +268,20 @@ pub struct ListItemAlignItems(pub Align);
 
 /// Template for the primary headline text of a list item
 #[derive(Template)]
-pub struct ListItemHeadline(TextInit);
+pub struct ListItemHeadline(TextValue);
 
 /// Template for supporting text with line clamping
 #[derive(Template)]
 pub struct ListItemSupporting {
   /// The number of visible text lines
   #[template(field = 1usize)]
-  lines: DeclareInit<usize>,
-  text: TextInit,
+  lines: PipeValue<usize>,
+  text: TextValue,
 }
 
 /// Template for trailing supporting text
 #[derive(Template)]
-pub struct ListItemTrailingSupporting(TextInit);
+pub struct ListItemTrailingSupporting(TextValue);
 
 /// Widget for images in list items
 #[simple_declare]
@@ -289,7 +289,7 @@ pub struct ListItemImg;
 
 /// Widget for thumbnail images in list items
 #[simple_declare]
-pub struct ListItemThumbNail;
+pub struct ListItemThumbnail;
 
 /// The template for the [`ListItem`] widget, which includes the leading,
 /// content, and trailing sections
@@ -335,10 +335,18 @@ impl ListItem {
   }
 
   /// Internal method to handle selection with toggle support
-  fn inner_select(&mut self, toggle: bool) { if toggle { self.toggle() } else { self.select() } }
+  fn select_action(mut this: WriteRef<Self>, mode: ListSelectMode) {
+    if this.interactive {
+      match mode {
+        ListSelectMode::None => {}
+        ListSelectMode::Single => this.toggle(),
+        ListSelectMode::Multi => this.select(),
+      }
+    }
+  }
 
   /// Generates classes based on the item's state
-  fn item_classes(item: &impl StateWatcher<Value = Self>) -> [DeclareInit<Option<ClassName>>; 3] {
+  fn item_classes(item: &impl StateWatcher<Value = Self>) -> [PipeValue<Option<ClassName>>; 3] {
     class_array![
       distinct_pipe! {
         if $item.is_selected() { LIST_ITEM_SELECTED } else { LIST_ITEM_UNSELECTED }
@@ -412,10 +420,9 @@ impl<'c> ComposeChild<'c> for ListCustomItem {
     let item_classes = ListItem::item_classes(&this.read().0);
     item_classes
       .with_child(stack! {
-        @InParentLayout {
-          @ $child {
-            v_align: ListItemAlignItems::get_align(BuildCtx::get()).map(|v| v.into()),
-          }
+        fit: StackFit::Passthrough,
+        @ $child {
+          v_align: ListItemAlignItems::get_align(BuildCtx::get()).map(|v| v.into()),
         }
       })
       .into_widget()
@@ -442,19 +449,19 @@ impl<'c> ComposeChild<'c> for ListItemImg {
   }
 }
 
-impl<'c> ComposeChild<'c> for ListItemThumbNail {
+impl<'c> ComposeChild<'c> for ListItemThumbnail {
   type Child = Widget<'c>;
 
   fn compose_child(_: impl StateWriter<Value = Self>, child: Self::Child) -> Widget<'c> {
-    class! { class: LIST_ITEM_THUMB_NAIL, @ { child } }.into_widget()
+    class! { class: LIST_ITEM_THUMBNAIL, @ { child } }.into_widget()
   }
 }
 
 impl ListItemAlignItems {
-  pub fn get_align(ctx: &BuildCtx) -> DeclareInit<Align> {
+  pub fn get_align(ctx: &BuildCtx) -> PipeValue<Align> {
     Variant::<Self>::new_or_default(ctx)
       .map(|v| v.0)
-      .declare_into()
+      .r_into()
   }
 }
 
@@ -494,11 +501,73 @@ impl<'w> ListItemChildren<'w> {
 }
 
 impl List {
-  pub fn selected_items(&self) -> impl DoubleEndedIterator<Item = &Stateful<ListItem>> {
+  /// Returns an iterator over all selected items in the list
+  ///
+  /// # Returns
+  ///
+  /// An iterator yielding pairs of index and reference to the selected
+  /// `ListItem`.
+  pub fn selected_items(&self) -> impl DoubleEndedIterator<Item = (usize, &Stateful<ListItem>)> {
     self
       .items
       .iter()
-      .filter(|item| item.read().is_selected())
+      .enumerate()
+      .filter(|(_, item)| item.read().is_selected())
+  }
+
+  /// Returns the active item's index and reference if available
+  ///
+  /// The active item is either:
+  /// - Last focused item
+  /// - Last selected item
+  pub fn active_item(&self) -> Option<(usize, &Stateful<ListItem>)> {
+    self.active_item.and_then(|active_idx| {
+      self
+        .items
+        .get(active_idx)
+        .map(|item| (active_idx, item))
+    })
+  }
+
+  /// Deselects all items in the list.
+  ///
+  /// This method iterates over all items in the list and marks each one as
+  /// unselected.
+  pub fn deselect_all(&mut self) {
+    self
+      .items
+      .iter()
+      .for_each(|item| item.write().deselect());
+    self.active_item = None;
+  }
+
+  /// Selects items according to the current [`ListSelectMode`]:
+  /// - **`Single`**: Selects the first item
+  /// - **`Multi`**: Selects all items
+  /// - **`None`**: No action
+  ///
+  /// # Returns
+  ///
+  /// The number of items selected:
+  /// - `0` in `None` mode
+  /// - `1` in `Single` mode (if items exist)
+  /// - Total item count in `Multi` mode
+  pub fn select_all(&mut self) -> usize {
+    let take_count = match self.select_mode {
+      ListSelectMode::Single => 1,
+      ListSelectMode::Multi => self.items.len(),
+      ListSelectMode::None => return 0,
+    };
+
+    self
+      .items
+      .iter()
+      .take(take_count)
+      .for_each(|item| item.write().select());
+
+    self.active_item = Some(0);
+
+    take_count
   }
 
   fn focus_next_item(&mut self, wnd: &Window) {
@@ -587,17 +656,17 @@ impl List {
   ) -> Widget<'c> {
     item.silent().wid = list_item.get_track_id_widget().read().track_id();
 
-    if self.select_mode == ListSelectMode::None {
+    let mode = self.select_mode;
+    if mode == ListSelectMode::None {
       list_item.into_widget()
     } else {
-      let toggle = self.select_mode == ListSelectMode::Multi;
       rdl! {
         @ $list_item {
-          on_tap: move |_| $item.write().inner_select(toggle),
+          on_tap: move |_| ListItem::select_action($item.write(), mode),
           on_key_down: move |e| {
             if matches!(e.key(), VirtualKey::Named(NamedKey::Enter)
               | VirtualKey::Named(NamedKey::Space)) {
-              $item.write().inner_select(toggle);
+              ListItem::select_action($item.write(), mode)
             }
           }
         }.into_widget()
@@ -694,7 +763,7 @@ mod tests {
        @ListItemSupporting { @ { "description"} }
      }
      @ListItem {
-       @ListItemThumbNail {
+       @ListItemThumbnail {
          @Container { size: Size::new(160., 90.), background: Color::GREEN }
        }
        @ListItemHeadline { @ { "Counter"} }
@@ -705,6 +774,15 @@ mod tests {
        @ListItemTrailingSupporting { @ { "100+" } }
        @Trailing { @Icon { @named_svgs::default() } }
      }
+
+     @ListItem {
+      @ListItemHeadline { @ { "Counter"} }
+      @Trailing {
+        @ListItemThumbnail {
+          @Container { size: Size::new(160., 90.), background: Color::GREEN }
+        }
+      }
+    }
    }).with_wnd_size(Size::new(320., 640.))
    .with_comparison(0.00005)
   }

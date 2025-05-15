@@ -192,23 +192,40 @@ struct FlexLayouter {
 }
 
 impl FlexLayouter {
-  fn layout(&mut self, clamp: BoxClamp, ctx: &mut LayoutCtx) -> Size {
+  fn layout(&mut self, mut clamp: BoxClamp, ctx: &mut LayoutCtx) -> Size {
     // Perform children layout without limit its main axis, and if its cross
     // axis is stretch the children need to align in cross axis so we also not limit
     // the cross axis.
     let dir = self.dir;
+    if !self.wrap && self.align_items == Align::Stretch {
+      match dir {
+        Direction::Horizontal if clamp.max.height.is_finite() => {
+          clamp = clamp.with_max_height(clamp.max.height);
+        }
+        Direction::Vertical if clamp.max.width.is_finite() => {
+          clamp = clamp.with_max_width(clamp.max.width);
+        }
+        _ => {}
+      }
+    }
+
     let flex_max = FlexSize::from_size(clamp.max, dir);
     let flex_min = FlexSize::from_size(clamp.min, dir);
 
     let child_clamp = self.create_child_clamp(clamp);
-
     self.perform_children_layout(flex_max.main, child_clamp, ctx);
-
-    if self.need_secondary_layout() {
+    if self.has_flex {
       // Uses minimum main axis size as distribution basis when max constraint
       // is unbounded
-      let flex_main = if flex_max.main.is_finite() { flex_max.main } else { flex_min.main };
-      self.stretch_and_flex_layout(flex_main, child_clamp, ctx);
+      let flex_main = if flex_max.main.is_finite() {
+        flex_max.main
+      } else {
+        self
+          .lines
+          .iter()
+          .fold(flex_min.main, |m, l| m.max(l.main_width))
+      };
+      self.flex_layout(flex_main, flex_max.main, child_clamp, ctx);
     }
 
     let expect = self.finally_size(flex_max);
@@ -235,8 +252,6 @@ impl FlexLayouter {
       }
     }
   }
-
-  fn need_secondary_layout(&self) -> bool { self.has_flex || self.align_items == Align::Stretch }
 
   fn perform_children_layout(&mut self, max_main: f32, clamp: BoxClamp, ctx: &mut LayoutCtx) {
     let (ctx, children) = ctx.split_children();
@@ -272,54 +287,65 @@ impl FlexLayouter {
       let line = &mut self.current_line;
       line.main_width += size.main;
 
-      let flex = ctx
-        .query_of_widget::<Expanded>(c)
-        .map(|expanded| expanded.flex)
-        .filter(|f| f.is_normal() && *f > 0.)
-        .inspect(|_| {
-          self.current_line.has_flex = true;
-          self.has_flex = true;
-        });
-      let info = FlexLayoutInfo { flex, pos: <_>::default(), size };
+      let flex = expanded.map(|e| {
+        self.current_line.has_flex = true;
+        self.has_flex = true;
+        e.flex
+      });
+      let info = FlexLayoutInfo {
+        flex,
+        pos: <_>::default(),
+        size,
+        defer_layout: expanded.is_some_and(|e| e.defer_alloc),
+      };
       self.current_line.items_info.push(info);
     }
 
     self.place_line();
   }
 
-  fn stretch_and_flex_layout(&mut self, main_width: f32, clamp: BoxClamp, ctx: &mut LayoutCtx) {
+  fn flex_layout(
+    &mut self, main_container: f32, main_max: f32, clamp: BoxClamp, ctx: &mut LayoutCtx,
+  ) {
     let (ctx, mut children) = ctx.split_children();
     let dir = self.dir;
 
     self.lines.iter_mut().for_each(|line| {
-      let mut line_clamp = clamp;
-      if self.align_items == Align::Stretch {
-        let cross = line.max_cross();
-        line_clamp = match dir {
-          Direction::Horizontal => line_clamp.with_fixed_height(cross),
-          Direction::Vertical => line_clamp.with_fixed_width(cross),
-        };
-      }
-      let flex_unit = line.calc_flex_unit_and_remove_useless_flex(main_width);
-
-      line.items_info.iter_mut().for_each(|info| {
+      let line_clamp = clamp;
+      let (flex_unit, mut space_left) = line.calc_flex_unit_and_space_left(main_container);
+      for info in line.items_info.iter_mut() {
         let child = children.next().unwrap();
         let mut item_clamp = line_clamp;
-        if let (Some(flex), Some(unit)) = (info.flex, flex_unit) {
-          let main = unit * flex;
+        if info.defer_layout {
+          if flex_unit == 0. && main_max > main_container {
+            let max = main_max - main_container + space_left;
+            item_clamp = match dir {
+              Direction::Horizontal => item_clamp.with_max_width(max),
+              Direction::Vertical => item_clamp.with_max_height(max),
+            };
+          } else {
+            let main = info.flex.unwrap() * flex_unit;
+            item_clamp = match dir {
+              Direction::Horizontal => item_clamp.with_fixed_width(main),
+              Direction::Vertical => item_clamp.with_fixed_height(main),
+            }
+          }
+        } else if info.flex.is_some() && space_left > 0. {
+          let main = (info.flex.unwrap() * flex_unit).min(info.size.main + space_left);
+          space_left -= main - info.size.main;
           item_clamp = match dir {
             Direction::Horizontal => item_clamp.with_fixed_width(main),
             Direction::Vertical => item_clamp.with_fixed_height(main),
           };
-        }
+        } else {
+          continue;
+        };
 
-        if self.align_items == Align::Stretch || (info.flex.is_some() && flex_unit.is_some()) {
-          let size = ctx.perform_child_layout(child, item_clamp);
-          let new_size = FlexSize::from_size(size, dir);
-          line.main_width += new_size.main - info.size.main;
-          info.size = new_size;
-        }
-      });
+        let size = ctx.perform_child_layout(child, item_clamp);
+        let new_size = FlexSize::from_size(size, dir);
+        line.main_width += new_size.main - info.size.main;
+        info.size = new_size;
+      }
     });
   }
 
@@ -408,43 +434,49 @@ struct FlexLayoutInfo {
   pos: FlexSize,
   size: FlexSize,
   flex: Option<f32>,
+  defer_layout: bool,
 }
 
 impl MainLineInfo {
   fn is_empty(&self) -> bool { self.items_info.is_empty() }
 
-  fn calc_flex_unit_and_remove_useless_flex(&mut self, max: f32) -> Option<f32> {
-    if !self.has_flex || self.main_width >= max {
-      return None;
+  // calc the flex unit and space left for all flex items with defer_alloc is
+  // false to try to expand to size according to flex.
+  // - return (flex_unit, space_left), all the flex items will try to expanded to
+  //   size according to flex.
+  // - return (flex_unit, 0.), only the expanded items with defer_alloc is true
+  //   will try to expanded to size according to flex.
+  fn calc_flex_unit_and_space_left(&mut self, max: f32) -> (f32, f32) {
+    if !self.has_flex {
+      return (0., 0.);
     }
 
-    let unit = self.flex_unit(max)?;
-    let mut unused_flex = false;
-    self
-      .items_info
-      .iter_mut()
-      .for_each(|item: &mut FlexLayoutInfo| {
-        if item
-          .flex
-          .is_some_and(|flex| flex * unit < item.size.main)
-        {
-          item.flex = None;
-          unused_flex = true;
-        }
-      });
+    // no space left, it's compact. no need to re-layout for flex with defer_alloc
+    // is false.
+    if self.main_width >= max {
+      return (0., 0.);
+    }
 
-    if unused_flex { self.flex_unit(max) } else { Some(unit) }
-  }
-
-  fn flex_unit(&self, max: f32) -> Option<f32> {
-    let (flex_sum, flex_width) = self
+    let (mut flex_alloc, mut flex_defer, mut flex_width) = (0., 0., 0.);
+    for item in self
       .items_info
       .iter()
-      .filter_map(|info| info.flex.map(|flex| (flex, info.size.main)))
-      .fold((0., 0.), |sum, (flex, size)| (sum.0 + flex, sum.1 + size));
+      .filter(|info| info.flex.is_some())
+    {
+      if item.defer_layout {
+        flex_defer += item.flex.unwrap();
+      } else {
+        flex_alloc += item.flex.unwrap();
+      }
+      flex_width += item.size.main;
+    }
 
-    let available_space = max - self.main_width + flex_width;
-    Some(available_space / flex_sum)
+    let unit = (max - self.main_width + flex_width) / (flex_alloc + flex_defer);
+    if unit * flex_alloc >= flex_width {
+      (unit, unit * flex_alloc - flex_width)
+    } else {
+      ((max - self.main_width) / flex_defer, 0.)
+    }
   }
 
   fn place_args(&self, main_max: f32, justify_content: JustifyContent, gap: f32) -> (f32, f32) {
@@ -676,8 +708,8 @@ mod tests {
     stretch_cross_align,
     cross_align(Align::Stretch),
     LayoutCase::default().with_size(Size::new(300., 40.)),
-    LayoutCase::new(&[0, 0]).with_rect(ribir_geom::rect(0., 0., 100., 40.)),
-    LayoutCase::new(&[0, 1]).with_rect(ribir_geom::rect(100., 0., 100., 40.)),
+    LayoutCase::new(&[0, 0]).with_rect(ribir_geom::rect(0., 0., 100., 20.)),
+    LayoutCase::new(&[0, 1]).with_rect(ribir_geom::rect(100., 0., 100., 30.)),
     LayoutCase::new(&[0, 2]).with_rect(ribir_geom::rect(200., 0., 100., 40.))
   );
 
@@ -761,17 +793,19 @@ mod tests {
         @Flex {
           direction: Direction::Horizontal,
           @Expanded {
+            defer_alloc: false,
             flex: 2.,
             @SizedBox { size: Size::splat(100.),}
           }
           @Expanded {
+            defer_alloc: false,
             flex: 1.,
             @SizedBox { size: Size::splat(50.),}
           }
           @SizedBox { size: Size::new(100., 20.) }
           @Expanded {
-            // The flex will be ignored, because the flex is not enough
-            flex: 0.5,
+            defer_alloc: false,
+            flex: 1.,
             @SizedBox { size: Size::splat(100.), }
           }
         }
@@ -814,5 +848,52 @@ mod tests {
     .with_wnd_size(Size::new(500., 500.)),
     LayoutCase::default().with_height(500.),
     LayoutCase::new(&[0, 0]).with_rect(ribir_geom::rect(0., 200., 100., 100.))
+  );
+
+  widget_layout_test!(
+    flex_when_zero_space,
+    WidgetTester::new(column! {
+      @Container {
+        size: Size::new(60., 500.),
+      }
+      @Expanded {
+        flex: 1.,
+        @Container {
+          size: Size::new(50., 140.),
+        }
+      }
+      @Expanded {
+        flex: 1.,
+        defer_alloc: false,
+        @Container {
+          size: Size::new(50., 140.),
+        }
+      }
+    })
+    .with_wnd_size(Size::new(500., 500.)),
+    LayoutCase::default().with_height(500.),
+    LayoutCase::new(&[0, 0]).with_rect(ribir_geom::rect(0., 0., 60., 500.)),
+    LayoutCase::new(&[0, 1]).with_rect(ribir_geom::rect(0., 500., 50., 0.)),
+    LayoutCase::new(&[0, 2]).with_rect(ribir_geom::rect(0., 500., 50., 140.))
+  );
+
+  widget_layout_test!(
+    fix_defer_alloc_has_size_in_unlimited_clamp,
+    WidgetTester::new(unconstrained_box! {
+      @Flex {
+        @Container {
+          size: Size::splat(300.),
+        }
+        @Expanded {
+          flex: 1.,
+          defer_alloc: true,
+          @Container {
+            size: Size::new(50., 140.),
+          }
+        }
+      }
+    })
+    .with_wnd_size(Size::splat(300.)),
+    LayoutCase::new(&[0, 0, 1]).with_size(Size::new(50., 140.)),
   );
 }
